@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I̸K̷A̵R̶O̸S̷</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Courier New', monospace;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+#bg { z-index: 1; }
+#main { z-index: 2; }
+#angels { z-index: 3; }
+#fx { z-index: 4; pointer-events: none; }
+#flash { z-index: 10; pointer-events: none; opacity: 0; }
+
+#overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  pointer-events: none;
+}
+
+#vignette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 101;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0%,
+    transparent 20%,
+    rgba(0,0,0,0.4) 50%,
+    rgba(0,0,0,0.9) 100%
+  );
+}
+
+#noise {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 102;
+  pointer-events: none;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#start-overlay.hidden {
+  display: none;
+}
+
+#start-text {
+  font-size: 1.2rem;
+  color: #666;
+  letter-spacing: 1.5em;
+  text-transform: uppercase;
+  animation: breathe 3s infinite ease-in-out;
+}
+
+#warning {
+  margin-top: 40px;
+  font-size: 0.6rem;
+  color: #300;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+#word {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  font-size: clamp(4rem, 20vw, 15rem);
+  font-weight: 100;
+  color: transparent;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  -webkit-text-stroke: 1px rgba(255,255,255,0.1);
+}
+
+#word.visible {
+  opacity: 1;
+}
+
+#word.flash {
+  color: #fff;
+  text-shadow: 0 0 100px #fff, 0 0 200px #fff;
+  -webkit-text-stroke: none;
+}
+
+#scanlines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 103;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 1px,
+    rgba(0,0,0,0.2) 1px,
+    rgba(0,0,0,0.2) 2px
+  );
+  opacity: 0.5;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div id="start-text">IKAROS</div>
+  <div id="warning">EXTREME FLASHING - PHOTOSENSITIVITY WARNING</div>
+</div>
+
+<canvas id="bg"></canvas>
+<canvas id="main"></canvas>
+<canvas id="angels"></canvas>
+<canvas id="fx"></canvas>
+<canvas id="flash"></canvas>
+
+<div id="overlay"></div>
+<div id="vignette"></div>
+<div id="noise"></div>
+<div id="scanlines"></div>
+
+<div id="word">FLY</div>
+
+<script>
+// ============================================
+// COMBICHRIST-STYLE INDUSTRIAL AUDIO ENGINE
+// ============================================
+class CombichristAudio {
+  constructor() {
+    this.ctx = null;
+    this.bpm = 140;
+    this.stepTime = 60 / this.bpm / 4;
+    this.isPlaying = false;
+    this.step = 0;
+    this.bar = 0;
+    this.section = 0; // 0 = buildup, 1 = drop
+
+    this.kickTriggered = false;
+    this.snareTriggered = false;
+    this.impactTriggered = false;
+
+    this.analyser = null;
+    this.frequencyData = null;
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Master chain
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.5;
+
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    // Multiband-style processing
+    // Low band (clean sub)
+    this.lowFilter = this.ctx.createBiquadFilter();
+    this.lowFilter.type = 'lowpass';
+    this.lowFilter.frequency.value = 150;
+
+    // Mid/High band (distorted)
+    this.highFilter = this.ctx.createBiquadFilter();
+    this.highFilter.type = 'highpass';
+    this.highFilter.frequency.value = 150;
+
+    this.distortion = this.ctx.createWaveShaper();
+    this.distortion.curve = this.makeDistortion(300);
+    this.distortion.oversample = '4x';
+
+    // Master compressor (hard limiting)
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -6;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.001;
+    this.limiter.release.value = 0.05;
+
+    // Gated reverb for drums
+    this.gateReverb = await this.createGatedReverb();
+    this.gateReverbGain = this.ctx.createGain();
+    this.gateReverbGain.gain.value = 0.3;
+
+    // Routing
+    const merger = this.ctx.createGain();
+
+    this.masterGain.connect(this.lowFilter);
+    this.lowFilter.connect(merger);
+
+    this.masterGain.connect(this.highFilter);
+    this.highFilter.connect(this.distortion);
+    this.distortion.connect(merger);
+
+    merger.connect(this.limiter);
+    this.limiter.connect(this.analyser);
+    this.analyser.connect(this.ctx.destination);
+
+    // Reverb send
+    this.reverbSend = this.ctx.createGain();
+    this.reverbSend.gain.value = 1;
+    this.reverbSend.connect(this.gateReverb);
+    this.gateReverb.connect(this.gateReverbGain);
+    this.gateReverbGain.connect(this.ctx.destination);
+
+    this.isPlaying = true;
+    this.startSequencer();
+    this.startDrone();
+  }
+
+  makeDistortion(amount) {
+    const samples = 44100;
+    const curve = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      // Asymmetric clipping for more harmonics
+      curve[i] = Math.tanh(x * amount) * 0.7 + Math.tanh(x * amount * 0.5) * 0.3;
+    }
+    return curve;
+  }
+
+  async createGatedReverb() {
+    const convolver = this.ctx.createConvolver();
+    const rate = this.ctx.sampleRate;
+    const length = rate * 0.4; // Short, gated
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        // Sharp gate at 80%
+        const gate = t < 0.8 ? 1 : Math.pow(1 - (t - 0.8) / 0.2, 4);
+        // Early reflections
+        let val = (Math.random() * 2 - 1) * gate;
+        if (i < rate * 0.05) {
+          val *= 2; // Boost early reflections
+        }
+        data[i] = val * Math.pow(1 - t * 0.5, 2);
+      }
+    }
+
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  startSequencer() {
+    const tick = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+      const stepInBar = this.step % 16;
+
+      // Section changes every 16 bars
+      if (this.step % 256 === 0) {
+        this.section = (this.section + 1) % 2;
+        if (this.section === 1) {
+          this.playImpact(now);
+          this.impactTriggered = true;
+          setTimeout(() => this.impactTriggered = false, 200);
+        }
+      }
+
+      // Industrial straight kick (4 on floor during drop)
+      if (this.section === 1) {
+        if (stepInBar % 4 === 0) {
+          this.playKick(now);
+          this.kickTriggered = true;
+          setTimeout(() => this.kickTriggered = false, 60);
+        }
+      } else {
+        // Sparse kicks during buildup
+        if (stepInBar === 0 || stepInBar === 10) {
+          this.playKick(now);
+          this.kickTriggered = true;
+          setTimeout(() => this.kickTriggered = false, 60);
+        }
+      }
+
+      // Snare on 4 and 12
+      if (stepInBar === 4 || stepInBar === 12) {
+        this.playSnare(now);
+        this.snareTriggered = true;
+        setTimeout(() => this.snareTriggered = false, 80);
+      }
+
+      // Hihats
+      if (this.section === 1 && stepInBar % 2 === 0) {
+        this.playHihat(now, stepInBar % 4 === 0);
+      }
+
+      // Bass during drop
+      if (this.section === 1) {
+        if (stepInBar === 0 || stepInBar === 6 || stepInBar === 10) {
+          this.playBass(now);
+        }
+      }
+
+      // Industrial texture
+      if (Math.random() < 0.08) {
+        this.playTexture(now);
+      }
+
+      // Scream/vocal-like synth
+      if (this.section === 1 && stepInBar === 0 && this.bar % 4 === 0) {
+        this.playScream(now);
+      }
+
+      // Atmosphere during buildup
+      if (this.section === 0 && this.step % 32 === 0) {
+        this.playAtmosphere(now);
+      }
+
+      this.step++;
+      if (this.step % 16 === 0) this.bar++;
+
+      setTimeout(tick, this.stepTime * 1000);
+    };
+
+    tick();
+  }
+
+  playKick(time) {
+    // Layered industrial kick
+
+    // Sub layer (clean)
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(80, time);
+    sub.frequency.exponentialRampToValueAtTime(35, time + 0.1);
+    subGain.gain.setValueAtTime(0.8, time);
+    subGain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+
+    // Body layer (distorted)
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    const bodyDist = this.ctx.createWaveShaper();
+    bodyDist.curve = this.makeDistortion(50);
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(150, time);
+    body.frequency.exponentialRampToValueAtTime(50, time + 0.08);
+    bodyGain.gain.setValueAtTime(0.5, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+
+    // Click layer (plastic thump)
+    const click = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    const clickFilter = this.ctx.createBiquadFilter();
+    click.type = 'square';
+    click.frequency.setValueAtTime(2500, time);
+    click.frequency.exponentialRampToValueAtTime(500, time + 0.01);
+    clickFilter.type = 'bandpass';
+    clickFilter.frequency.value = 3000;
+    clickFilter.Q.value = 2;
+    clickGain.gain.setValueAtTime(0.3, time);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.015);
+
+    // Noise transient
+    const noiseLen = this.ctx.sampleRate * 0.02;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 2000;
+    noiseGain.gain.value = 0.15;
+
+    // Connect
+    sub.connect(subGain).connect(this.masterGain);
+    body.connect(bodyDist).connect(bodyGain).connect(this.masterGain);
+    click.connect(clickFilter).connect(clickGain).connect(this.masterGain);
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.reverbSend);
+
+    sub.start(time);
+    sub.stop(time + 0.3);
+    body.start(time);
+    body.stop(time + 0.2);
+    click.start(time);
+    click.stop(time + 0.02);
+    noise.start(time);
+  }
+
+  playSnare(time) {
+    // Metallic industrial snare
+
+    // Noise layer
+    const noiseLen = this.ctx.sampleRate * 0.15;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+    const noiseDist = this.ctx.createWaveShaper();
+
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 4000;
+    noiseFilter.Q.value = 1;
+    noiseDist.curve = this.makeDistortion(100);
+
+    noiseGain.gain.setValueAtTime(0.4, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+
+    // Body (metallic ring)
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(220, time);
+    body.frequency.exponentialRampToValueAtTime(150, time + 0.03);
+    bodyGain.gain.setValueAtTime(0.3, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+
+    // Ring modulation for metallic quality
+    const ring = this.ctx.createOscillator();
+    const ringGain = this.ctx.createGain();
+    ring.type = 'sine';
+    ring.frequency.value = 180;
+    ringGain.gain.value = 0.1;
+
+    noise.connect(noiseFilter).connect(noiseDist).connect(noiseGain).connect(this.masterGain);
+    noise.connect(this.reverbSend);
+    body.connect(bodyGain).connect(this.masterGain);
+    ring.connect(ringGain).connect(this.masterGain);
+
+    noise.start(time);
+    body.start(time);
+    body.stop(time + 0.1);
+    ring.start(time);
+    ring.stop(time + 0.05);
+  }
+
+  playHihat(time, accent) {
+    const len = this.ctx.sampleRate * 0.03;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buf;
+
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    filter.type = 'highpass';
+    filter.frequency.value = 8000;
+
+    const vol = accent ? 0.12 : 0.06;
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+
+    source.connect(filter).connect(gain).connect(this.masterGain);
+    source.start(time);
+  }
+
+  playBass(time) {
+    // Reese-style bass with clean sub
+    const notes = [55, 55, 41.2, 55, 49, 55, 36.7, 41.2]; // Dark progression
+    const freq = notes[this.bar % notes.length];
+
+    // Clean sub
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    const subFilter = this.ctx.createBiquadFilter();
+    sub.type = 'sine';
+    sub.frequency.value = freq;
+    subFilter.type = 'lowpass';
+    subFilter.frequency.value = 100;
+    subGain.gain.setValueAtTime(0.4, time);
+    subGain.gain.exponentialRampToValueAtTime(0.1, time + 0.2);
+    subGain.gain.exponentialRampToValueAtTime(0.01, time + 0.35);
+
+    // Dirty mid (reese)
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const osc3 = this.ctx.createOscillator();
+    const reeseGain = this.ctx.createGain();
+    const reeseFilter = this.ctx.createBiquadFilter();
+    const reeseDist = this.ctx.createWaveShaper();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'sawtooth';
+    osc3.type = 'sawtooth';
+    osc1.frequency.value = freq * 2;
+    osc2.frequency.value = freq * 2 * 1.007; // Detune
+    osc3.frequency.value = freq * 2 * 0.993;
+
+    reeseFilter.type = 'lowpass';
+    reeseFilter.frequency.setValueAtTime(3000, time);
+    reeseFilter.frequency.exponentialRampToValueAtTime(300, time + 0.2);
+    reeseFilter.Q.value = 8;
+
+    reeseDist.curve = this.makeDistortion(80);
+
+    reeseGain.gain.setValueAtTime(0.25, time);
+    reeseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.3);
+
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.33;
+
+    sub.connect(subFilter).connect(subGain).connect(this.masterGain);
+    osc1.connect(merger);
+    osc2.connect(merger);
+    osc3.connect(merger);
+    merger.connect(reeseFilter).connect(reeseDist).connect(reeseGain).connect(this.masterGain);
+
+    sub.start(time);
+    sub.stop(time + 0.4);
+    osc1.start(time);
+    osc2.start(time);
+    osc3.start(time);
+    osc1.stop(time + 0.35);
+    osc2.stop(time + 0.35);
+    osc3.stop(time + 0.35);
+  }
+
+  playTexture(time) {
+    // Industrial metal scrape/texture
+    const len = this.ctx.sampleRate * 0.1;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+
+    // Metallic noise
+    let phase = 0;
+    for (let i = 0; i < len; i++) {
+      const freq = 2000 + Math.sin(i * 0.01) * 1000;
+      phase += freq / this.ctx.sampleRate;
+      data[i] = Math.sin(phase * Math.PI * 2) * 0.3 + (Math.random() * 2 - 1) * 0.7;
+      data[i] *= 1 - i / len;
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buf;
+
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    filter.type = 'bandpass';
+    filter.frequency.value = 2000 + Math.random() * 3000;
+    filter.Q.value = 5;
+
+    gain.gain.value = 0.05;
+
+    source.connect(filter).connect(gain).connect(this.masterGain);
+    source.start(time);
+  }
+
+  playScream(time) {
+    // Vocal-like distorted synth
+    const freq = 300 + Math.random() * 200;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    const dist = this.ctx.createWaveShaper();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, time);
+    osc.frequency.setValueAtTime(freq * 1.2, time + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.8, time + 0.4);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1500, time);
+    filter.frequency.setValueAtTime(2500, time + 0.1);
+    filter.frequency.exponentialRampToValueAtTime(800, time + 0.4);
+    filter.Q.value = 5;
+
+    dist.curve = this.makeDistortion(200);
+
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.15, time + 0.05);
+    gain.gain.setValueAtTime(0.15, time + 0.3);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+
+    osc.connect(filter).connect(dist).connect(gain).connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.55);
+  }
+
+  playAtmosphere(time) {
+    // Dark pad
+    const freq = 55 + Math.random() * 55;
+
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+    osc1.frequency.value = freq;
+    osc2.frequency.value = freq * 1.5;
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.08, time + 2);
+    gain.gain.linearRampToValueAtTime(0, time + 6);
+
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.5;
+    osc1.connect(merger);
+    osc2.connect(merger);
+    merger.connect(filter).connect(gain).connect(this.masterGain);
+
+    osc1.start(time);
+    osc2.start(time);
+    osc1.stop(time + 6.5);
+    osc2.stop(time + 6.5);
+  }
+
+  playImpact(time) {
+    // Massive impact for section changes
+
+    // Reverse riser
+    const riser = this.ctx.createOscillator();
+    const riserGain = this.ctx.createGain();
+    riser.type = 'sawtooth';
+    riser.frequency.setValueAtTime(30, time);
+    riser.frequency.exponentialRampToValueAtTime(500, time + 0.3);
+    riserGain.gain.setValueAtTime(0.4, time);
+    riserGain.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
+
+    // Noise boom
+    const noiseLen = this.ctx.sampleRate * 0.8;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / noiseLen, 2);
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.value = 500;
+    noiseGain.gain.value = 0.5;
+
+    // Sub boom
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(80, time);
+    sub.frequency.exponentialRampToValueAtTime(20, time + 0.5);
+    subGain.gain.setValueAtTime(1, time);
+    subGain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
+
+    riser.connect(riserGain).connect(this.masterGain);
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    sub.connect(subGain).connect(this.masterGain);
+
+    riser.start(time);
+    riser.stop(time + 0.45);
+    noise.start(time);
+    sub.start(time);
+    sub.stop(time + 0.65);
+  }
+
+  startDrone() {
+    // Constant dark undertone
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.value = 27.5; // A0
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 100;
+
+    gain.gain.value = 0.05;
+
+    osc.connect(filter).connect(gain).connect(this.masterGain);
+    osc.start();
+
+    // Modulate
+    const modulate = () => {
+      if (!this.isPlaying) return;
+      const freq = 27.5 + Math.sin(this.ctx.currentTime * 0.1) * 5;
+      osc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.5);
+      setTimeout(modulate, 500);
+    };
+    modulate();
+  }
+
+  getFrequencyData() {
+    if (this.analyser) {
+      this.analyser.getByteFrequencyData(this.frequencyData);
+    }
+    return this.frequencyData;
+  }
+}
+
+// ============================================
+// IKAROS VISUALS - FALLING ANGELS
+// ============================================
+class IkarosVisuals {
+  constructor(audio) {
+    this.audio = audio;
+
+    this.bgCanvas = document.getElementById('bg');
+    this.bgCtx = this.bgCanvas.getContext('2d');
+
+    this.mainCanvas = document.getElementById('main');
+    this.mainCtx = this.mainCanvas.getContext('2d');
+
+    this.angelCanvas = document.getElementById('angels');
+    this.angelCtx = this.angelCanvas.getContext('2d');
+
+    this.fxCanvas = document.getElementById('fx');
+    this.fxCtx = this.fxCanvas.getContext('2d');
+
+    this.flashCanvas = document.getElementById('flash');
+    this.flashCtx = this.flashCanvas.getContext('2d');
+
+    this.wordEl = document.getElementById('word');
+    this.words = ['FLY', 'FALL', 'BURN', 'RISE', 'DIE'];
+    this.wordIndex = 0;
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.lastTime = performance.now();
+
+    this.fallingAngels = [];
+    this.feathers = [];
+    this.glitchLines = [];
+    this.cracks = [];
+
+    this.flashIntensity = 0;
+    this.flashColor = '#fff';
+    this.lastKick = false;
+    this.lastSnare = false;
+    this.lastImpact = false;
+
+    this.sunPulse = 0;
+
+    // Initialize angels
+    for (let i = 0; i < 8; i++) {
+      this.spawnAngel();
+    }
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    [this.bgCanvas, this.mainCanvas, this.angelCanvas, this.fxCanvas, this.flashCanvas].forEach(c => {
+      c.width = w * dpr;
+      c.height = h * dpr;
+      c.style.width = w + 'px';
+      c.style.height = h + 'px';
+      c.getContext('2d').scale(dpr, dpr);
+    });
+  }
+
+  spawnAngel() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.fallingAngels.push({
+      x: Math.random() * w,
+      y: -100 - Math.random() * 300,
+      vx: (Math.random() - 0.5) * 2,
+      vy: 1 + Math.random() * 2,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 0.05,
+      scale: 0.5 + Math.random() * 0.8,
+      wingPhase: Math.random() * Math.PI * 2,
+      wingBroken: Math.random() < 0.6,
+      opacity: 0.3 + Math.random() * 0.4,
+    });
+  }
+
+  spawnFeather(x, y) {
+    this.feathers.push({
+      x: x,
+      y: y,
+      vx: (Math.random() - 0.5) * 3,
+      vy: Math.random() * 2,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 0.1,
+      size: 5 + Math.random() * 15,
+      opacity: 0.5 + Math.random() * 0.5,
+      drift: Math.random() * Math.PI * 2,
+    });
+  }
+
+  drawAngel(ctx, angel, time) {
+    ctx.save();
+    ctx.translate(angel.x, angel.y);
+    ctx.rotate(angel.rotation);
+    ctx.scale(angel.scale, angel.scale);
+    ctx.globalAlpha = angel.opacity;
+
+    const wingFlap = angel.wingBroken ? 0 : Math.sin(time * 3 + angel.wingPhase) * 0.2;
+
+    // Body
+    ctx.fillStyle = '#111';
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+
+    // Torso
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 15, 40, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -55, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Arms (spread out like falling)
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+
+    // Left arm
+    ctx.beginPath();
+    ctx.moveTo(-15, -20);
+    ctx.quadraticCurveTo(-50, -40, -70, 0);
+    ctx.stroke();
+
+    // Right arm
+    ctx.beginPath();
+    ctx.moveTo(15, -20);
+    ctx.quadraticCurveTo(50, -40, 70, 0);
+    ctx.stroke();
+
+    // Wings
+    ctx.lineWidth = 2;
+
+    // Left wing
+    ctx.save();
+    ctx.translate(-20, -10);
+    ctx.rotate(-0.3 + wingFlap);
+    this.drawWing(ctx, -1, angel.wingBroken);
+    ctx.restore();
+
+    // Right wing
+    ctx.save();
+    ctx.translate(20, -10);
+    ctx.rotate(0.3 - wingFlap);
+    this.drawWing(ctx, 1, angel.wingBroken);
+    ctx.restore();
+
+    // Legs
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(-8, 40);
+    ctx.lineTo(-15, 90);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(8, 40);
+    ctx.lineTo(15, 90);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawWing(ctx, dir, broken) {
+    ctx.fillStyle = '#0a0a0a';
+    ctx.strokeStyle = '#222';
+
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+
+    if (broken) {
+      // Broken/torn wing
+      ctx.quadraticCurveTo(dir * 30, -20, dir * 50, -10);
+      ctx.lineTo(dir * 45, 5);
+      ctx.lineTo(dir * 55, 10);
+      ctx.lineTo(dir * 40, 15);
+      ctx.lineTo(dir * 30, 10);
+      ctx.quadraticCurveTo(dir * 15, 20, 0, 30);
+    } else {
+      // Full wing
+      ctx.quadraticCurveTo(dir * 40, -30, dir * 80, -20);
+      ctx.lineTo(dir * 90, -10);
+      ctx.lineTo(dir * 95, 5);
+      ctx.lineTo(dir * 85, 15);
+      ctx.lineTo(dir * 70, 20);
+      ctx.lineTo(dir * 50, 25);
+      ctx.quadraticCurveTo(dir * 25, 35, 0, 40);
+    }
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Feather details
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(dir * i * 15, -5 + i * 5);
+      ctx.lineTo(dir * (i * 15 + 10), i * 3);
+      ctx.stroke();
+    }
+  }
+
+  drawFeather(ctx, f) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.rotation);
+    ctx.globalAlpha = f.opacity;
+
+    ctx.fillStyle = '#1a1a1a';
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(0, -f.size);
+    ctx.quadraticCurveTo(f.size * 0.3, -f.size * 0.3, f.size * 0.2, f.size * 0.5);
+    ctx.quadraticCurveTo(0, f.size, -f.size * 0.2, f.size * 0.5);
+    ctx.quadraticCurveTo(-f.size * 0.3, -f.size * 0.3, 0, -f.size);
+    ctx.fill();
+    ctx.stroke();
+
+    // Spine
+    ctx.beginPath();
+    ctx.moveTo(0, -f.size);
+    ctx.lineTo(0, f.size * 0.8);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawSun(ctx, w, h, intensity) {
+    const cx = w / 2;
+    const cy = h * 0.1;
+    const baseRadius = 80 + this.sunPulse * 30;
+
+    // Outer glow
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseRadius * 3);
+    gradient.addColorStop(0, `rgba(255, 200, 100, ${0.3 + intensity * 0.3})`);
+    gradient.addColorStop(0.3, `rgba(255, 100, 50, ${0.15 + intensity * 0.1})`);
+    gradient.addColorStop(0.6, `rgba(200, 50, 20, ${0.05})`);
+    gradient.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h * 0.5);
+
+    // Core
+    const coreGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseRadius);
+    coreGradient.addColorStop(0, '#fff');
+    coreGradient.addColorStop(0.3, '#ffa040');
+    coreGradient.addColorStop(0.7, '#ff4020');
+    coreGradient.addColorStop(1, '#400');
+
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rays
+    ctx.strokeStyle = `rgba(255, 150, 50, ${0.2 + intensity * 0.3})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2 + this.time * 0.1;
+      const len = baseRadius * (1.5 + Math.sin(this.time * 2 + i) * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * baseRadius, cy + Math.sin(angle) * baseRadius);
+      ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+      ctx.stroke();
+    }
+  }
+
+  drawSmoke(ctx, w, h) {
+    const gradient = ctx.createLinearGradient(0, h * 0.7, 0, h);
+    gradient.addColorStop(0, 'transparent');
+    gradient.addColorStop(0.5, 'rgba(20, 10, 5, 0.4)');
+    gradient.addColorStop(1, 'rgba(10, 5, 0, 0.8)');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, h * 0.7, w, h * 0.3);
+
+    // Smoke wisps
+    ctx.strokeStyle = 'rgba(50, 30, 20, 0.3)';
+    ctx.lineWidth = 30;
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < 5; i++) {
+      const x = (i / 5) * w + Math.sin(this.time * 0.5 + i) * 50;
+      const y = h * 0.85 + Math.sin(this.time * 0.3 + i * 2) * 20;
+
+      ctx.beginPath();
+      ctx.moveTo(x, h);
+      ctx.quadraticCurveTo(
+        x + Math.sin(this.time + i) * 30,
+        y,
+        x + Math.sin(this.time * 0.7 + i) * 50,
+        h * 0.7
+      );
+      ctx.stroke();
+    }
+  }
+
+  drawGlitchTear(ctx, w, h) {
+    if (this.glitchLines.length < 3 && Math.random() < 0.02) {
+      this.glitchLines.push({
+        y: Math.random() * h,
+        offset: (Math.random() - 0.5) * 50,
+        height: 2 + Math.random() * 10,
+        life: 0.3 + Math.random() * 0.3,
+      });
+    }
+
+    this.glitchLines = this.glitchLines.filter(line => {
+      line.life -= 0.02;
+      if (line.life <= 0) return false;
+
+      ctx.save();
+      ctx.globalAlpha = line.life;
+
+      // Horizontal tear effect
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, line.y, w, line.height);
+
+      // Offset slice
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '100,0,0' : '255,255,255'}, 0.3)`;
+      ctx.fillRect(line.offset, line.y, w, line.height * 0.5);
+
+      ctx.restore();
+      return true;
+    });
+  }
+
+  update() {
+    const now = performance.now();
+    const delta = now - this.lastTime;
+    this.lastTime = now;
+    this.time += delta * 0.001;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const audioData = this.audio.getFrequencyData();
+
+    // Calculate intensity
+    let bass = 0, mid = 0;
+    if (audioData) {
+      for (let i = 0; i < 10; i++) bass += audioData[i];
+      for (let i = 10; i < 50; i++) mid += audioData[i];
+      bass = bass / 10 / 255;
+      mid = mid / 40 / 255;
+    }
+
+    const intensity = (bass + mid) / 2;
+    this.sunPulse = bass;
+
+    // Trigger effects
+    if (this.audio.kickTriggered && !this.lastKick) {
+      this.flashIntensity = 0.8;
+      this.flashColor = Math.random() < 0.3 ? '#400' : '#fff';
+    }
+    this.lastKick = this.audio.kickTriggered;
+
+    if (this.audio.snareTriggered && !this.lastSnare) {
+      // Spawn feathers on snare
+      const angel = this.fallingAngels[Math.floor(Math.random() * this.fallingAngels.length)];
+      if (angel) {
+        for (let i = 0; i < 3; i++) {
+          this.spawnFeather(angel.x + (Math.random() - 0.5) * 50, angel.y);
+        }
+      }
+    }
+    this.lastSnare = this.audio.snareTriggered;
+
+    if (this.audio.impactTriggered && !this.lastImpact) {
+      this.flashIntensity = 1;
+      this.flashColor = '#fff';
+      this.wordIndex = (this.wordIndex + 1) % this.words.length;
+      this.wordEl.textContent = this.words[this.wordIndex];
+      this.wordEl.classList.add('visible', 'flash');
+      setTimeout(() => {
+        this.wordEl.classList.remove('flash');
+      }, 100);
+      setTimeout(() => {
+        this.wordEl.classList.remove('visible');
+      }, 500);
+
+      // Spawn extra angels
+      for (let i = 0; i < 3; i++) {
+        this.spawnAngel();
+      }
+    }
+    this.lastImpact = this.audio.impactTriggered;
+
+    // === BACKGROUND ===
+    this.bgCtx.fillStyle = '#050505';
+    this.bgCtx.fillRect(0, 0, w, h);
+
+    this.drawSun(this.bgCtx, w, h, intensity);
+    this.drawSmoke(this.bgCtx, w, h);
+
+    // === MAIN (particles, effects) ===
+    this.mainCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    this.mainCtx.fillRect(0, 0, w, h);
+
+    // Light rays from sun
+    this.mainCtx.save();
+    this.mainCtx.globalAlpha = 0.05 + intensity * 0.1;
+    const rayGrad = this.mainCtx.createLinearGradient(w/2, 0, w/2, h);
+    rayGrad.addColorStop(0, '#ffa040');
+    rayGrad.addColorStop(0.5, '#400');
+    rayGrad.addColorStop(1, 'transparent');
+
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * 0.6 - 0.3 + Math.sin(this.time * 0.5 + i) * 0.05;
+      this.mainCtx.save();
+      this.mainCtx.translate(w/2, h * 0.1);
+      this.mainCtx.rotate(angle);
+      this.mainCtx.fillStyle = rayGrad;
+      this.mainCtx.beginPath();
+      this.mainCtx.moveTo(-20, 0);
+      this.mainCtx.lineTo(-100, h);
+      this.mainCtx.lineTo(100, h);
+      this.mainCtx.lineTo(20, 0);
+      this.mainCtx.fill();
+      this.mainCtx.restore();
+    }
+    this.mainCtx.restore();
+
+    // === ANGELS ===
+    this.angelCtx.clearRect(0, 0, w, h);
+
+    // Update and draw falling angels
+    this.fallingAngels = this.fallingAngels.filter(angel => {
+      angel.x += angel.vx;
+      angel.y += angel.vy * (1 + intensity * 0.5);
+      angel.rotation += angel.rotationSpeed;
+      angel.vx += (Math.random() - 0.5) * 0.1;
+
+      // Shed feathers occasionally
+      if (Math.random() < 0.01) {
+        this.spawnFeather(angel.x, angel.y);
+      }
+
+      if (angel.y > h + 200) {
+        return false;
+      }
+
+      this.drawAngel(this.angelCtx, angel, this.time);
+      return true;
+    });
+
+    // Spawn new angels
+    if (this.fallingAngels.length < 5) {
+      this.spawnAngel();
+    }
+
+    // Update and draw feathers
+    this.feathers = this.feathers.filter(f => {
+      f.x += f.vx + Math.sin(this.time * 2 + f.drift) * 0.5;
+      f.y += f.vy;
+      f.rotation += f.rotationSpeed;
+      f.vy += 0.02;
+      f.opacity -= 0.003;
+
+      if (f.opacity <= 0 || f.y > h + 50) return false;
+
+      this.drawFeather(this.angelCtx, f);
+      return true;
+    });
+
+    // === FX LAYER ===
+    this.fxCtx.clearRect(0, 0, w, h);
+    this.drawGlitchTear(this.fxCtx, w, h);
+
+    // === FLASH ===
+    if (this.flashIntensity > 0) {
+      this.flashCanvas.style.opacity = this.flashIntensity;
+      this.flashCtx.fillStyle = this.flashColor;
+      this.flashCtx.fillRect(0, 0, w, h);
+      this.flashIntensity -= 0.08;
+    } else {
+      this.flashCanvas.style.opacity = 0;
+    }
+  }
+}
+
+// ============================================
+// MAIN
+// ============================================
+let audio, visuals;
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  audio = new CombichristAudio();
+  await audio.init();
+
+  visuals = new IkarosVisuals(audio);
+
+  function animate() {
+    visuals.update();
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#start-overlay')) return;
+  if (visuals) {
+    visuals.flashIntensity = 0.5;
+    visuals.flashColor = '#400';
+    for (let i = 0; i < 5; i++) {
+      visuals.spawnFeather(e.clientX, e.clientY);
+    }
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && visuals) {
+    visuals.spawnAngel();
+    visuals.flashIntensity = 0.3;
+  }
+});
+</script>
+
+</body>
+</html>
