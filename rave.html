@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R̴A̵V̸E̷</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Courier New', monospace;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+#main { z-index: 1; }
+#silhouettes { z-index: 2; mix-blend-mode: screen; }
+#flash { z-index: 10; pointer-events: none; opacity: 0; }
+#strobes { z-index: 5; pointer-events: none; mix-blend-mode: screen; }
+
+#overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,0,0,0.1) 2px,
+      rgba(0,0,0,0.1) 4px
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 0%,
+      transparent 30%,
+      rgba(0,0,0,0.7) 100%
+    );
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#start-overlay.hidden {
+  display: none;
+}
+
+#start-text {
+  font-size: 1.5rem;
+  color: #fff;
+  letter-spacing: 1em;
+  text-transform: uppercase;
+  animation: pulse 0.5s infinite alternate;
+}
+
+#warning {
+  margin-top: 30px;
+  font-size: 0.65rem;
+  color: #f00;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+@keyframes pulse {
+  from { opacity: 1; text-shadow: 0 0 20px #fff; }
+  to { opacity: 0.5; text-shadow: 0 0 5px #fff; }
+}
+
+#bpm {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 50;
+  font-size: 2rem;
+  font-weight: bold;
+  color: rgba(255,255,255,0.3);
+  font-family: 'Courier New', monospace;
+}
+
+#info {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 50;
+  font-size: 9px;
+  color: rgba(255,255,255,0.4);
+  line-height: 1.8;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div id="start-text">ENTER</div>
+  <div id="warning">EXTREME FLASHING LIGHTS - SEIZURE WARNING</div>
+</div>
+
+<canvas id="main"></canvas>
+<canvas id="silhouettes"></canvas>
+<canvas id="strobes"></canvas>
+<canvas id="flash"></canvas>
+
+<div id="overlay"></div>
+
+<div id="bpm">174</div>
+<div id="info">
+  <div>DROP: <span id="drop-status">WAITING</span></div>
+  <div>KICK: <span id="kick-status">--</span></div>
+  <div>BASS: <span id="bass-status">--</span>Hz</div>
+</div>
+
+<script>
+// Industrial DnB Audio Engine
+class IndustrialAudio {
+  constructor() {
+    this.ctx = null;
+    this.bpm = 174;
+    this.stepTime = 60 / this.bpm / 4;
+    this.isPlaying = false;
+    this.step = 0;
+    this.bar = 0;
+    this.dropActive = false;
+    this.kickTriggered = false;
+    this.snareTriggered = false;
+    this.bassFreq = 55;
+
+    this.analyser = null;
+    this.frequencyData = null;
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.4;
+
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    // Сайдчейн компрессор
+    this.sidechain = this.ctx.createDynamicsCompressor();
+    this.sidechain.threshold.value = -30;
+    this.sidechain.knee.value = 0;
+    this.sidechain.ratio.value = 20;
+    this.sidechain.attack.value = 0.001;
+    this.sidechain.release.value = 0.1;
+
+    // Дисторшн
+    this.distortion = this.ctx.createWaveShaper();
+    this.distortion.curve = this.makeDistortion(400);
+    this.distortion.oversample = '4x';
+
+    // Мастер лимитер
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -3;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.001;
+    this.limiter.release.value = 0.01;
+
+    // Роутинг
+    this.masterGain
+      .connect(this.distortion)
+      .connect(this.limiter)
+      .connect(this.analyser)
+      .connect(this.ctx.destination);
+
+    this.isPlaying = true;
+    this.startSequencer();
+  }
+
+  makeDistortion(amount) {
+    const samples = 44100;
+    const curve = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
+    }
+    return curve;
+  }
+
+  startSequencer() {
+    const tick = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+
+      // 16 шагов = 1 бар
+      const stepInBar = this.step % 16;
+
+      // Кик на 1 и 9 (или более агрессивно)
+      if (stepInBar === 0 || stepInBar === 8) {
+        this.playKick(now);
+        this.kickTriggered = true;
+        setTimeout(() => this.kickTriggered = false, 50);
+      }
+
+      // Снейр на 4 и 12
+      if (stepInBar === 4 || stepInBar === 12) {
+        this.playSnare(now);
+        this.snareTriggered = true;
+        setTimeout(() => this.snareTriggered = false, 50);
+      }
+
+      // Хайхеты
+      if (stepInBar % 2 === 0) {
+        this.playHihat(now, stepInBar % 4 === 0);
+      }
+
+      // Бас-линия
+      if (this.dropActive) {
+        if (stepInBar === 0 || stepInBar === 6 || stepInBar === 10 || stepInBar === 14) {
+          this.playBass(now);
+        }
+
+        // Рейвовый стаб
+        if (stepInBar === 0 && this.bar % 2 === 0) {
+          this.playStab(now);
+        }
+
+        // Глитчи
+        if (Math.random() < 0.15) {
+          this.playGlitch(now);
+        }
+      }
+
+      // Атмосфера
+      if (this.step % 64 === 0) {
+        this.playAtmosphere(now);
+      }
+
+      // Каждые 8 баров - дроп или брейк
+      if (this.step % 128 === 0) {
+        this.dropActive = !this.dropActive;
+        document.getElementById('drop-status').textContent = this.dropActive ? 'ACTIVE' : 'BUILD';
+
+        if (this.dropActive) {
+          this.playImpact(now);
+        }
+      }
+
+      this.step++;
+      if (this.step % 16 === 0) this.bar++;
+
+      document.getElementById('kick-status').textContent = this.kickTriggered ? 'HIT' : '--';
+      document.getElementById('bass-status').textContent = Math.round(this.bassFreq);
+
+      setTimeout(tick, this.stepTime * 1000);
+    };
+
+    tick();
+  }
+
+  playKick(time) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(30, time + 0.15);
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 200;
+
+    gain.gain.setValueAtTime(1, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+
+    // Клик
+    const click = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    click.type = 'square';
+    click.frequency.value = 1500;
+    clickGain.gain.setValueAtTime(0.3, time);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.01);
+
+    osc.connect(filter).connect(gain).connect(this.masterGain);
+    click.connect(clickGain).connect(this.masterGain);
+
+    osc.start(time);
+    osc.stop(time + 0.35);
+    click.start(time);
+    click.stop(time + 0.02);
+  }
+
+  playSnare(time) {
+    // Шум
+    const bufferSize = this.ctx.sampleRate * 0.2;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 1000;
+
+    noiseGain.gain.setValueAtTime(0.5, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+
+    // Тело снейра
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(200, time);
+    osc.frequency.exponentialRampToValueAtTime(100, time + 0.05);
+    oscGain.gain.setValueAtTime(0.3, time);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    osc.connect(oscGain).connect(this.masterGain);
+
+    noise.start(time);
+    osc.start(time);
+    osc.stop(time + 0.15);
+  }
+
+  playHihat(time, accent) {
+    const bufferSize = this.ctx.sampleRate * 0.05;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    filter.type = 'highpass';
+    filter.frequency.value = 7000;
+
+    const vol = accent ? 0.15 : 0.08;
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.03);
+
+    noise.connect(filter).connect(gain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playBass(time) {
+    // Neuro-стиль бас
+    const notes = [55, 55, 73.42, 55, 82.41, 55, 61.74, 82.41];
+    this.bassFreq = notes[this.bar % notes.length];
+
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    const distort = this.ctx.createWaveShaper();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = this.bassFreq;
+
+    osc2.type = 'square';
+    osc2.frequency.value = this.bassFreq * 1.005; // Лёгкая расстройка
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2000, time);
+    filter.frequency.exponentialRampToValueAtTime(200, time + 0.15);
+    filter.Q.value = 10;
+
+    distort.curve = this.makeDistortion(100);
+
+    gain.gain.setValueAtTime(0.4, time);
+    gain.gain.setTargetAtTime(0.2, time + 0.05, 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.25);
+
+    const merger = this.ctx.createChannelMerger(2);
+    osc1.connect(merger);
+    osc2.connect(merger);
+    merger.connect(filter).connect(distort).connect(gain).connect(this.masterGain);
+
+    osc1.start(time);
+    osc2.start(time);
+    osc1.stop(time + 0.3);
+    osc2.stop(time + 0.3);
+
+    // FM модуляция для грязи
+    const mod = this.ctx.createOscillator();
+    const modGain = this.ctx.createGain();
+    mod.frequency.value = this.bassFreq * 2;
+    modGain.gain.value = this.bassFreq * 0.5;
+    mod.connect(modGain).connect(osc1.frequency);
+    mod.start(time);
+    mod.stop(time + 0.3);
+  }
+
+  playStab(time) {
+    const chord = [0, 7, 12, 15]; // Минорный аккорд с октавой
+    const baseFreq = 220;
+
+    chord.forEach((semitone, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.value = baseFreq * Math.pow(2, semitone / 12);
+
+      gain.gain.setValueAtTime(0.1, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 1000 + i * 500;
+      filter.Q.value = 5;
+
+      osc.connect(filter).connect(gain).connect(this.masterGain);
+      osc.start(time);
+      osc.stop(time + 0.35);
+    });
+  }
+
+  playGlitch(time) {
+    const bufferSize = this.ctx.sampleRate * 0.05;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    // Битовый шум
+    for (let i = 0; i < bufferSize; i++) {
+      const bit = Math.floor(Math.random() * 8);
+      data[i] = ((i >> bit) & 1) * 2 - 1;
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.1, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+
+    source.connect(gain).connect(this.masterGain);
+    source.start(time);
+  }
+
+  playAtmosphere(time) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    osc.frequency.value = 110 + Math.random() * 220;
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 500;
+
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.05, time + 1);
+    gain.gain.linearRampToValueAtTime(0, time + 4);
+
+    osc.connect(filter).connect(gain).connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 4.5);
+  }
+
+  playImpact(time) {
+    // Реверс-райзер эффект
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(30, time);
+    osc.frequency.exponentialRampToValueAtTime(2000, time + 0.5);
+
+    gain.gain.setValueAtTime(0.3, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
+
+    osc.connect(gain).connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.7);
+
+    // Шумовой удар
+    const bufferSize = this.ctx.sampleRate * 0.5;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = 0.2;
+
+    noise.connect(noiseGain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  getFrequencyData() {
+    if (this.analyser) {
+      this.analyser.getByteFrequencyData(this.frequencyData);
+    }
+    return this.frequencyData;
+  }
+}
+
+// Визуал
+class RaveVisuals {
+  constructor(audio) {
+    this.audio = audio;
+
+    this.mainCanvas = document.getElementById('main');
+    this.mainCtx = this.mainCanvas.getContext('2d');
+
+    this.silCanvas = document.getElementById('silhouettes');
+    this.silCtx = this.silCanvas.getContext('2d');
+
+    this.strobeCanvas = document.getElementById('strobes');
+    this.strobeCtx = this.strobeCanvas.getContext('2d');
+
+    this.flashCanvas = document.getElementById('flash');
+    this.flashCtx = this.flashCanvas.getContext('2d');
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.lastKick = false;
+    this.lastSnare = false;
+    this.flashIntensity = 0;
+    this.strobePhase = 0;
+
+    this.silhouettes = this.generateSilhouettes(15);
+    this.lasers = [];
+    this.particles = [];
+
+    for (let i = 0; i < 8; i++) {
+      this.lasers.push({
+        angle: (i / 8) * Math.PI * 2,
+        speed: 0.5 + Math.random() * 1,
+        hue: Math.random() * 360,
+        width: 2 + Math.random() * 4,
+      });
+    }
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    [this.mainCanvas, this.silCanvas, this.strobeCanvas, this.flashCanvas].forEach(c => {
+      c.width = w * dpr;
+      c.height = h * dpr;
+      c.style.width = w + 'px';
+      c.style.height = h + 'px';
+      c.getContext('2d').scale(dpr, dpr);
+    });
+  }
+
+  generateSilhouettes(count) {
+    const silhouettes = [];
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    for (let i = 0; i < count; i++) {
+      silhouettes.push({
+        x: (i / count) * w + (Math.random() - 0.5) * 100,
+        baseY: h,
+        height: 100 + Math.random() * 150,
+        width: 30 + Math.random() * 40,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.5 + Math.random() * 1.5,
+        armPhase: Math.random() * Math.PI * 2,
+        type: Math.floor(Math.random() * 3),
+      });
+    }
+
+    return silhouettes;
+  }
+
+  drawSilhouette(ctx, s, time, intensity) {
+    ctx.save();
+    ctx.translate(s.x, s.baseY);
+
+    // Покачивание
+    const sway = Math.sin(time * s.speed + s.phase) * 5 * (1 + intensity);
+    ctx.translate(sway, 0);
+
+    // Тело
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+
+    const headY = -s.height;
+    const headSize = s.width * 0.4;
+    const shoulderY = -s.height * 0.75;
+    const shoulderWidth = s.width * 0.6;
+    const waistY = -s.height * 0.4;
+    const waistWidth = s.width * 0.35;
+    const hipWidth = s.width * 0.45;
+
+    // Голова
+    ctx.arc(0, headY, headSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Тело
+    ctx.beginPath();
+    ctx.moveTo(-shoulderWidth, shoulderY);
+    ctx.lineTo(shoulderWidth, shoulderY);
+    ctx.lineTo(waistWidth, waistY);
+    ctx.lineTo(hipWidth, 0);
+    ctx.lineTo(-hipWidth, 0);
+    ctx.lineTo(-waistWidth, waistY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Ноги
+    const legSpread = Math.sin(time * s.speed * 2) * 10 * intensity;
+    ctx.beginPath();
+    ctx.moveTo(-hipWidth * 0.8, 0);
+    ctx.lineTo(-hipWidth * 0.5 - legSpread, 0);
+    ctx.lineTo(hipWidth * 0.5 + legSpread, 0);
+    ctx.lineTo(hipWidth * 0.8, 0);
+    ctx.fill();
+
+    // Руки (поднятые на дропе)
+    const armRaise = intensity > 0.5 ?
+      Math.sin(time * 3 + s.armPhase) * 0.3 - 0.7 :
+      Math.sin(time * s.speed + s.armPhase) * 0.2;
+
+    ctx.lineWidth = s.width * 0.12;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#000';
+
+    // Левая рука
+    ctx.beginPath();
+    ctx.moveTo(-shoulderWidth, shoulderY);
+    const leftArmX = -shoulderWidth - s.width * 0.5;
+    const leftArmY = shoulderY + armRaise * s.height * 0.3;
+    ctx.quadraticCurveTo(
+      -shoulderWidth - s.width * 0.3,
+      shoulderY + armRaise * s.height * 0.1,
+      leftArmX,
+      leftArmY
+    );
+    ctx.stroke();
+
+    // Правая рука
+    ctx.beginPath();
+    ctx.moveTo(shoulderWidth, shoulderY);
+    const rightArmX = shoulderWidth + s.width * 0.5;
+    const rightArmY = shoulderY + armRaise * s.height * 0.3 + Math.sin(time * 4 + s.phase) * 10;
+    ctx.quadraticCurveTo(
+      shoulderWidth + s.width * 0.3,
+      shoulderY + armRaise * s.height * 0.1,
+      rightArmX,
+      rightArmY
+    );
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  update() {
+    const now = performance.now();
+    const delta = now - (this.lastTime || now);
+    this.lastTime = now;
+    this.time += delta * 0.001;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const audioData = this.audio.getFrequencyData();
+
+    // Вычисляем интенсивность
+    let bass = 0, mid = 0, high = 0;
+    if (audioData) {
+      for (let i = 0; i < 10; i++) bass += audioData[i];
+      for (let i = 10; i < 50; i++) mid += audioData[i];
+      for (let i = 50; i < 128; i++) high += audioData[i];
+      bass = bass / 10 / 255;
+      mid = mid / 40 / 255;
+      high = high / 78 / 255;
+    }
+
+    const intensity = (bass + mid + high) / 3;
+
+    // Детект кика
+    if (this.audio.kickTriggered && !this.lastKick) {
+      this.flashIntensity = 1;
+      this.spawnParticles(w / 2, h / 2, 30);
+    }
+    this.lastKick = this.audio.kickTriggered;
+
+    // Детект снейра
+    if (this.audio.snareTriggered && !this.lastSnare) {
+      this.strobePhase = Math.PI;
+    }
+    this.lastSnare = this.audio.snareTriggered;
+
+    // === MAIN CANVAS ===
+    this.mainCtx.fillStyle = `rgba(0, 0, 0, ${0.15 + intensity * 0.1})`;
+    this.mainCtx.fillRect(0, 0, w, h);
+
+    // Лазеры
+    this.lasers.forEach(laser => {
+      laser.angle += laser.speed * 0.02 * (1 + intensity);
+
+      const cx = w / 2;
+      const cy = h * 0.3;
+      const length = Math.max(w, h) * 1.5;
+
+      const x2 = cx + Math.cos(laser.angle) * length;
+      const y2 = cy + Math.sin(laser.angle) * length * 0.5;
+
+      const gradient = this.mainCtx.createLinearGradient(cx, cy, x2, y2);
+      gradient.addColorStop(0, `hsla(${laser.hue + this.time * 50}, 100%, 60%, 0.8)`);
+      gradient.addColorStop(0.3, `hsla(${laser.hue + this.time * 50}, 100%, 50%, 0.4)`);
+      gradient.addColorStop(1, 'transparent');
+
+      this.mainCtx.strokeStyle = gradient;
+      this.mainCtx.lineWidth = laser.width * (1 + bass * 2);
+      this.mainCtx.beginPath();
+      this.mainCtx.moveTo(cx, cy);
+      this.mainCtx.lineTo(x2, y2);
+      this.mainCtx.stroke();
+
+      // Отражение
+      const x2r = cx + Math.cos(-laser.angle) * length;
+      const y2r = cy + Math.sin(-laser.angle) * length * 0.5;
+      this.mainCtx.beginPath();
+      this.mainCtx.moveTo(cx, cy);
+      this.mainCtx.lineTo(x2r, y2r);
+      this.mainCtx.stroke();
+
+      laser.hue = (laser.hue + 0.5) % 360;
+    });
+
+    // Частицы
+    this.particles = this.particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.2;
+      p.life -= 0.02;
+
+      if (p.life <= 0) return false;
+
+      this.mainCtx.fillStyle = `hsla(${p.hue}, 100%, 60%, ${p.life})`;
+      this.mainCtx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+
+      return true;
+    });
+
+    // === SILHOUETTES ===
+    this.silCtx.clearRect(0, 0, w, h);
+
+    // Градиент для силуэтов
+    const silGradient = this.silCtx.createLinearGradient(0, h * 0.5, 0, h);
+    silGradient.addColorStop(0, 'transparent');
+    silGradient.addColorStop(0.3, `hsla(${this.time * 30}, 80%, 20%, 0.3)`);
+    silGradient.addColorStop(1, `hsla(${this.time * 30 + 180}, 80%, 10%, 0.5)`);
+    this.silCtx.fillStyle = silGradient;
+    this.silCtx.fillRect(0, 0, w, h);
+
+    this.silhouettes.forEach(s => {
+      this.drawSilhouette(this.silCtx, s, this.time, intensity);
+    });
+
+    // === STROBES ===
+    this.strobeCtx.clearRect(0, 0, w, h);
+    this.strobePhase += 0.3 * (1 + intensity * 2);
+
+    if (this.audio.dropActive && Math.sin(this.strobePhase) > 0.7) {
+      const strobeIntensity = (Math.sin(this.strobePhase) - 0.7) / 0.3;
+      this.strobeCtx.fillStyle = `rgba(255, 255, 255, ${strobeIntensity * 0.5})`;
+      this.strobeCtx.fillRect(0, 0, w, h);
+    }
+
+    // === FLASH ===
+    if (this.flashIntensity > 0) {
+      this.flashCanvas.style.opacity = this.flashIntensity;
+      this.flashCtx.fillStyle = '#fff';
+      this.flashCtx.fillRect(0, 0, w, h);
+      this.flashIntensity -= 0.1;
+    } else {
+      this.flashCanvas.style.opacity = 0;
+    }
+  }
+
+  spawnParticles(x, y, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 5 + Math.random() * 15;
+      this.particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 5,
+        size: 3 + Math.random() * 8,
+        hue: Math.random() * 60 + 0, // Красно-оранжевые
+        life: 1,
+      });
+    }
+  }
+}
+
+// Main
+let audio, visuals;
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  audio = new IndustrialAudio();
+  await audio.init();
+
+  visuals = new RaveVisuals(audio);
+
+  function animate() {
+    visuals.update();
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+
+// Клик для дополнительных эффектов
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#start-overlay')) return;
+  if (visuals) {
+    visuals.spawnParticles(e.clientX, e.clientY, 50);
+    visuals.flashIntensity = 0.5;
+  }
+});
+</script>
+
+</body>
+</html>
