@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M̷A̸J̵E̶S̷T̸I̵C̶</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --gold: #d4af37;
+  --gold-bright: #ffd700;
+  --gold-dark: #8b7355;
+  --gold-dim: #5c4a2a;
+  --black: #0a0a0a;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--black);
+  font-family: 'Times New Roman', serif;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+#bg { z-index: 1; }
+#rays { z-index: 2; }
+#main { z-index: 3; }
+#ornaments { z-index: 4; }
+#flash { z-index: 10; pointer-events: none; opacity: 0; }
+
+#vignette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0%,
+    transparent 30%,
+    rgba(0,0,0,0.5) 60%,
+    rgba(0,0,0,0.9) 100%
+  );
+}
+
+#noise {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 101;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: var(--black);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#start-overlay.hidden {
+  display: none;
+}
+
+#start-text {
+  font-size: 1rem;
+  color: var(--gold);
+  letter-spacing: 1em;
+  text-transform: uppercase;
+  font-weight: 300;
+  animation: goldPulse 2s infinite ease-in-out;
+}
+
+#seed-display {
+  margin-top: 30px;
+  font-size: 0.6rem;
+  color: var(--gold-dim);
+  letter-spacing: 0.5em;
+  font-family: 'Courier New', monospace;
+}
+
+@keyframes goldPulse {
+  0%, 100% { opacity: 0.5; text-shadow: 0 0 10px var(--gold-dark); }
+  50% { opacity: 1; text-shadow: 0 0 30px var(--gold); }
+}
+
+#word {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  font-size: clamp(3rem, 12vw, 10rem);
+  font-weight: 100;
+  color: var(--gold);
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  text-shadow: 0 0 50px var(--gold), 0 0 100px var(--gold-dark);
+  font-family: 'Times New Roman', serif;
+}
+
+#word.visible {
+  opacity: 1;
+}
+
+#info {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  font-size: 0.6rem;
+  color: var(--gold-dim);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-family: 'Courier New', monospace;
+  opacity: 0.5;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div id="start-text">ENTER THE RENAISSANCE</div>
+  <div id="seed-display">SEED: <span id="seed-value">---</span></div>
+</div>
+
+<canvas id="bg"></canvas>
+<canvas id="rays"></canvas>
+<canvas id="main"></canvas>
+<canvas id="ornaments"></canvas>
+<canvas id="flash"></canvas>
+
+<div id="vignette"></div>
+<div id="noise"></div>
+
+<div id="word">MAJESTIC</div>
+<div id="info"><span id="bpm-display">---</span> BPM | <span id="key-display">---</span></div>
+
+<script>
+// ============================================
+// SEEDED RANDOM NUMBER GENERATOR
+// ============================================
+class SeededRandom {
+  constructor(seed) {
+    this.seed = seed;
+    this.state = seed;
+  }
+
+  next() {
+    this.state = (this.state * 1103515245 + 12345) & 0x7fffffff;
+    return this.state / 0x7fffffff;
+  }
+
+  range(min, max) {
+    return min + this.next() * (max - min);
+  }
+
+  int(min, max) {
+    return Math.floor(this.range(min, max + 1));
+  }
+
+  choice(arr) {
+    return arr[this.int(0, arr.length - 1)];
+  }
+
+  shuffle(arr) {
+    const result = [...arr];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = this.int(0, i);
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+}
+
+// ============================================
+// APASHE-STYLE ORCHESTRAL TRAP AUDIO
+// ============================================
+class MajesticAudio {
+  constructor(seed) {
+    this.rng = new SeededRandom(seed);
+    this.ctx = null;
+    this.isPlaying = false;
+
+    // Randomized parameters
+    this.bpm = this.rng.int(130, 160);
+    this.stepTime = 60 / this.bpm / 4;
+
+    // Generate random key (minor scale)
+    const rootNotes = [130.81, 138.59, 146.83, 155.56, 164.81, 174.61, 185]; // C3-B3
+    const keyNames = ['Cm', 'C#m', 'Dm', 'D#m', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'A#m', 'Bm'];
+    const keyIndex = this.rng.int(0, 11);
+    this.rootFreq = 130.81 * Math.pow(2, keyIndex / 12);
+    this.keyName = keyNames[keyIndex];
+
+    // Minor scale intervals
+    this.scale = [0, 2, 3, 5, 7, 8, 10]; // Natural minor
+
+    // Generate chord progression
+    this.progressions = [
+      [0, 5, 3, 6],  // i - VI - IV - VII
+      [0, 3, 5, 6],  // i - IV - VI - VII
+      [0, 6, 5, 3],  // i - VII - VI - IV
+      [0, 5, 6, 3],  // i - VI - VII - IV
+    ];
+    this.progression = this.rng.choice(this.progressions);
+
+    // Generate drum pattern
+    this.kickPattern = this.generateKickPattern();
+    this.snarePattern = [4, 12]; // Standard backbeat
+    this.hihatPattern = this.generateHihatPattern();
+
+    // Structure
+    this.step = 0;
+    this.bar = 0;
+    this.section = 0; // 0=intro, 1=build, 2=drop, 3=breakdown
+    this.sectionLengths = [8, 8, 16, 8]; // bars
+
+    this.kickTriggered = false;
+    this.snareTriggered = false;
+    this.dropTriggered = false;
+
+    this.analyser = null;
+    this.frequencyData = null;
+
+    // Update display
+    document.getElementById('bpm-display').textContent = this.bpm;
+    document.getElementById('key-display').textContent = this.keyName;
+    document.getElementById('seed-value').textContent = seed;
+  }
+
+  generateKickPattern() {
+    const patterns = [
+      [0, 6, 10],
+      [0, 8],
+      [0, 4, 10],
+      [0, 6, 8, 14],
+      [0, 10, 14],
+    ];
+    return this.rng.choice(patterns);
+  }
+
+  generateHihatPattern() {
+    const density = this.rng.int(1, 3);
+    const pattern = [];
+    for (let i = 0; i < 16; i++) {
+      if (i % density === 0) pattern.push(i);
+    }
+    return pattern;
+  }
+
+  getFreqFromScale(degree, octave = 0) {
+    const scaleLen = this.scale.length;
+    const adjustedDegree = ((degree % scaleLen) + scaleLen) % scaleLen;
+    const octaveShift = Math.floor(degree / scaleLen);
+    const semitones = this.scale[adjustedDegree];
+    return this.rootFreq * Math.pow(2, (semitones / 12) + octave + octaveShift);
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.5;
+
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    // Compressor
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -10;
+    this.compressor.knee.value = 5;
+    this.compressor.ratio.value = 8;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.1;
+
+    // Reverb
+    this.reverb = await this.createReverb();
+    this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = 0.3;
+
+    // Routing
+    this.masterGain.connect(this.compressor);
+    this.compressor.connect(this.analyser);
+    this.analyser.connect(this.ctx.destination);
+
+    this.reverbSend = this.ctx.createGain();
+    this.reverbSend.gain.value = 1;
+    this.reverbSend.connect(this.reverb);
+    this.reverb.connect(this.reverbGain);
+    this.reverbGain.connect(this.ctx.destination);
+
+    this.isPlaying = true;
+    this.startSequencer();
+  }
+
+  async createReverb() {
+    const convolver = this.ctx.createConvolver();
+    const rate = this.ctx.sampleRate;
+    const length = rate * 2.5;
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2);
+      }
+    }
+
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  startSequencer() {
+    const tick = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+      const stepInBar = this.step % 16;
+      const chordIndex = this.bar % 4;
+      const chordDegree = this.progression[chordIndex];
+
+      // Section management
+      let totalBars = 0;
+      let currentSection = 0;
+      for (let i = 0; i < this.sectionLengths.length; i++) {
+        totalBars += this.sectionLengths[i];
+        if (this.bar < totalBars) {
+          currentSection = i;
+          break;
+        }
+        if (i === this.sectionLengths.length - 1) {
+          // Loop
+          this.bar = 0;
+          currentSection = 0;
+        }
+      }
+
+      // Detect section change to drop
+      if (currentSection === 2 && this.section !== 2) {
+        this.dropTriggered = true;
+        setTimeout(() => this.dropTriggered = false, 300);
+        this.playImpact(now);
+      }
+      this.section = currentSection;
+
+      // === ORCHESTRAL ELEMENTS ===
+
+      // Strings (play on chord changes)
+      if (stepInBar === 0) {
+        const intensity = this.section === 2 ? 0.4 : 0.2;
+        this.playStrings(chordDegree, now, intensity);
+      }
+
+      // Brass stabs (on drops)
+      if (this.section === 2 && stepInBar === 0 && this.bar % 2 === 0) {
+        this.playBrass(chordDegree, now);
+      }
+
+      // Choir (build and drops)
+      if ((this.section === 1 || this.section === 2) && stepInBar === 0 && this.bar % 4 === 0) {
+        this.playChoir(chordDegree, now);
+      }
+
+      // Timpani rolls (builds)
+      if (this.section === 1 && stepInBar % 4 === 0) {
+        this.playTimpani(now, stepInBar === 12);
+      }
+
+      // === TRAP ELEMENTS (mainly on drops) ===
+
+      if (this.section === 2) {
+        // 808 Kick
+        if (this.kickPattern.includes(stepInBar)) {
+          this.play808Kick(now, chordDegree);
+          this.kickTriggered = true;
+          setTimeout(() => this.kickTriggered = false, 80);
+        }
+
+        // Snare
+        if (this.snarePattern.includes(stepInBar)) {
+          this.playSnare(now);
+          this.snareTriggered = true;
+          setTimeout(() => this.snareTriggered = false, 60);
+        }
+
+        // Hihats
+        if (this.hihatPattern.includes(stepInBar)) {
+          this.playHihat(now, stepInBar % 4 === 0);
+        }
+
+        // Bass
+        if (stepInBar === 0 || stepInBar === 8) {
+          this.playBass(chordDegree, now);
+        }
+      }
+
+      // Sparse percussion in intro/breakdown
+      if ((this.section === 0 || this.section === 3) && stepInBar === 0) {
+        this.playTimpani(now, false);
+      }
+
+      // Riser in build
+      if (this.section === 1 && stepInBar === 0 && this.bar === totalBars - this.sectionLengths[1]) {
+        this.playRiser(now, this.sectionLengths[1] * 4 * this.stepTime);
+      }
+
+      this.step++;
+      if (this.step % 16 === 0) this.bar++;
+
+      setTimeout(tick, this.stepTime * 1000);
+    };
+
+    tick();
+  }
+
+  playStrings(degree, time, intensity = 0.2) {
+    // Chord: root, third, fifth, octave
+    const notes = [
+      this.getFreqFromScale(degree, 0),
+      this.getFreqFromScale(degree + 2, 0),
+      this.getFreqFromScale(degree + 4, 0),
+      this.getFreqFromScale(degree, 1),
+    ];
+
+    notes.forEach((freq, i) => {
+      // Multiple detuned oscillators for richness
+      for (let d = -1; d <= 1; d++) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        osc.type = 'sawtooth';
+        osc.frequency.value = freq * Math.pow(2, d * 0.02 / 12); // Slight detune
+
+        filter.type = 'lowpass';
+        filter.frequency.value = 2000 + i * 500;
+        filter.Q.value = 1;
+
+        // Slow attack for strings
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(intensity / 3, time + 0.3);
+        gain.gain.setValueAtTime(intensity / 3, time + 1);
+        gain.gain.linearRampToValueAtTime(0, time + 2);
+
+        osc.connect(filter).connect(gain).connect(this.masterGain);
+        osc.connect(this.reverbSend);
+
+        osc.start(time);
+        osc.stop(time + 2.5);
+      }
+    });
+  }
+
+  playBrass(degree, time) {
+    const freq = this.getFreqFromScale(degree, 1);
+
+    // Brass with formant-like filtering
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'square';
+    osc1.frequency.value = freq;
+    osc2.frequency.value = freq * 0.5;
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(500, time);
+    filter.frequency.linearRampToValueAtTime(3000, time + 0.05);
+    filter.frequency.exponentialRampToValueAtTime(800, time + 0.3);
+    filter.Q.value = 3;
+
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.25, time + 0.02);
+    gain.gain.setValueAtTime(0.25, time + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.5;
+    osc1.connect(merger);
+    osc2.connect(merger);
+    merger.connect(filter).connect(gain).connect(this.masterGain);
+    merger.connect(this.reverbSend);
+
+    osc1.start(time);
+    osc2.start(time);
+    osc1.stop(time + 0.5);
+    osc2.stop(time + 0.5);
+  }
+
+  playChoir(degree, time) {
+    const freq = this.getFreqFromScale(degree, 1);
+
+    // Choir-like pad with filtered noise
+    const osc = this.ctx.createOscillator();
+    const noiseLen = this.ctx.sampleRate * 3;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+
+    const oscGain = this.ctx.createGain();
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+
+    // Vowel-like formant
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 1500;
+    noiseFilter.Q.value = 5;
+
+    oscGain.gain.setValueAtTime(0, time);
+    oscGain.gain.linearRampToValueAtTime(0.1, time + 0.5);
+    oscGain.gain.setValueAtTime(0.1, time + 1.5);
+    oscGain.gain.linearRampToValueAtTime(0, time + 2.5);
+
+    noiseGain.gain.setValueAtTime(0, time);
+    noiseGain.gain.linearRampToValueAtTime(0.02, time + 0.5);
+    noiseGain.gain.linearRampToValueAtTime(0, time + 2.5);
+
+    osc.connect(oscGain).connect(this.masterGain);
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    osc.connect(this.reverbSend);
+
+    osc.start(time);
+    osc.stop(time + 3);
+    noise.start(time);
+  }
+
+  playTimpani(time, accent = false) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(80, time);
+    osc.frequency.exponentialRampToValueAtTime(50, time + 0.3);
+
+    const vol = accent ? 0.5 : 0.25;
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+
+    // Noise transient
+    const noiseLen = this.ctx.sampleRate * 0.03;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = 0.1;
+
+    osc.connect(gain).connect(this.masterGain);
+    noise.connect(noiseGain).connect(this.reverbSend);
+
+    osc.start(time);
+    osc.stop(time + 0.6);
+    noise.start(time);
+  }
+
+  play808Kick(time, degree = 0) {
+    const baseFreq = this.getFreqFromScale(degree, -2);
+
+    // Sub layer
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(baseFreq * 2, time);
+    sub.frequency.exponentialRampToValueAtTime(baseFreq, time + 0.1);
+    subGain.gain.setValueAtTime(0.7, time);
+    subGain.gain.exponentialRampToValueAtTime(0.3, time + 0.2);
+    subGain.gain.exponentialRampToValueAtTime(0.01, time + 0.8);
+
+    // Click
+    const click = this.ctx.createOscillator();
+    const clickGain = this.ctx.createGain();
+    click.type = 'square';
+    click.frequency.value = 1000;
+    clickGain.gain.setValueAtTime(0.2, time);
+    clickGain.gain.exponentialRampToValueAtTime(0.01, time + 0.02);
+
+    sub.connect(subGain).connect(this.masterGain);
+    click.connect(clickGain).connect(this.masterGain);
+
+    sub.start(time);
+    sub.stop(time + 1);
+    click.start(time);
+    click.stop(time + 0.03);
+  }
+
+  playSnare(time) {
+    // Noise
+    const noiseLen = this.ctx.sampleRate * 0.15;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 2000;
+
+    noiseGain.gain.setValueAtTime(0.4, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+
+    // Body
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(200, time);
+    body.frequency.exponentialRampToValueAtTime(100, time + 0.05);
+    bodyGain.gain.setValueAtTime(0.3, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    noise.connect(this.reverbSend);
+    body.connect(bodyGain).connect(this.masterGain);
+
+    noise.start(time);
+    body.start(time);
+    body.stop(time + 0.15);
+  }
+
+  playHihat(time, accent = false) {
+    const noiseLen = this.ctx.sampleRate * 0.04;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    filter.type = 'highpass';
+    filter.frequency.value = 8000;
+
+    const vol = accent ? 0.12 : 0.06;
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+    noise.connect(filter).connect(gain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playBass(degree, time) {
+    const freq = this.getFreqFromScale(degree, -1);
+
+    // Clean sub
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.value = freq;
+    subGain.gain.setValueAtTime(0.35, time);
+    subGain.gain.exponentialRampToValueAtTime(0.2, time + 0.3);
+    subGain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+
+    // Growl mid
+    const mid1 = this.ctx.createOscillator();
+    const mid2 = this.ctx.createOscillator();
+    const midGain = this.ctx.createGain();
+    const midFilter = this.ctx.createBiquadFilter();
+
+    mid1.type = 'sawtooth';
+    mid2.type = 'sawtooth';
+    mid1.frequency.value = freq * 2;
+    mid2.frequency.value = freq * 2 * 1.01;
+
+    midFilter.type = 'lowpass';
+    midFilter.frequency.setValueAtTime(2000, time);
+    midFilter.frequency.exponentialRampToValueAtTime(400, time + 0.3);
+    midFilter.Q.value = 8;
+
+    midGain.gain.setValueAtTime(0.15, time);
+    midGain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.5;
+    mid1.connect(merger);
+    mid2.connect(merger);
+
+    sub.connect(subGain).connect(this.masterGain);
+    merger.connect(midFilter).connect(midGain).connect(this.masterGain);
+
+    sub.start(time);
+    mid1.start(time);
+    mid2.start(time);
+    sub.stop(time + 0.6);
+    mid1.stop(time + 0.5);
+    mid2.stop(time + 0.5);
+  }
+
+  playRiser(time, duration) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, time);
+    osc.frequency.exponentialRampToValueAtTime(2000, time + duration);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(200, time);
+    filter.frequency.exponentialRampToValueAtTime(8000, time + duration);
+
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.15, time + duration * 0.8);
+    gain.gain.linearRampToValueAtTime(0, time + duration);
+
+    osc.connect(filter).connect(gain).connect(this.masterGain);
+
+    osc.start(time);
+    osc.stop(time + duration + 0.1);
+  }
+
+  playImpact(time) {
+    // Boom
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(80, time);
+    sub.frequency.exponentialRampToValueAtTime(20, time + 0.5);
+    subGain.gain.setValueAtTime(1, time);
+    subGain.gain.exponentialRampToValueAtTime(0.01, time + 0.8);
+
+    // Crash
+    const noiseLen = this.ctx.sampleRate * 1;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / noiseLen, 2);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = 0.3;
+
+    sub.connect(subGain).connect(this.masterGain);
+    noise.connect(noiseGain).connect(this.reverbSend);
+
+    sub.start(time);
+    sub.stop(time + 0.9);
+    noise.start(time);
+  }
+
+  getFrequencyData() {
+    if (this.analyser) {
+      this.analyser.getByteFrequencyData(this.frequencyData);
+    }
+    return this.frequencyData;
+  }
+}
+
+// ============================================
+// BLACK & GOLD BAROQUE VISUALS
+// ============================================
+class MajesticVisuals {
+  constructor(audio, seed) {
+    this.audio = audio;
+    this.rng = new SeededRandom(seed);
+
+    this.bgCanvas = document.getElementById('bg');
+    this.bgCtx = this.bgCanvas.getContext('2d');
+
+    this.raysCanvas = document.getElementById('rays');
+    this.raysCtx = this.raysCanvas.getContext('2d');
+
+    this.mainCanvas = document.getElementById('main');
+    this.mainCtx = this.mainCanvas.getContext('2d');
+
+    this.ornCanvas = document.getElementById('ornaments');
+    this.ornCtx = this.ornCanvas.getContext('2d');
+
+    this.flashCanvas = document.getElementById('flash');
+    this.flashCtx = this.flashCanvas.getContext('2d');
+
+    this.wordEl = document.getElementById('word');
+    this.words = ['MAJESTIC', 'REQUIEM', 'GLORIA', 'RENAISSANCE', 'IMPERIUM', 'ETERNUM'];
+    this.wordIndex = this.rng.int(0, this.words.length - 1);
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.lastTime = performance.now();
+
+    // Randomized visual parameters
+    this.rayCount = this.rng.int(6, 12);
+    this.ornamentStyle = this.rng.int(0, 2);
+    this.symmetry = this.rng.choice([4, 6, 8]);
+
+    this.particles = [];
+    this.flashIntensity = 0;
+    this.lastKick = false;
+    this.lastSnare = false;
+    this.lastDrop = false;
+
+    this.centralPulse = 0;
+    this.bassEnergy = 0;
+
+    // Pre-generate ornament curves
+    this.generateOrnaments();
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    [this.bgCanvas, this.raysCanvas, this.mainCanvas, this.ornCanvas, this.flashCanvas].forEach(c => {
+      c.width = w * dpr;
+      c.height = h * dpr;
+      c.style.width = w + 'px';
+      c.style.height = h + 'px';
+      c.getContext('2d').scale(dpr, dpr);
+    });
+
+    this.generateOrnaments();
+  }
+
+  generateOrnaments() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const size = Math.min(w, h) * 0.15;
+
+    this.ornamentPaths = [];
+
+    // Corner ornaments
+    const corners = [
+      { x: 0, y: 0, rot: 0 },
+      { x: w, y: 0, rot: Math.PI / 2 },
+      { x: w, y: h, rot: Math.PI },
+      { x: 0, y: h, rot: -Math.PI / 2 },
+    ];
+
+    corners.forEach(corner => {
+      const path = [];
+      const steps = 20;
+
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        // Baroque spiral/flourish
+        const angle = t * Math.PI * 0.5;
+        const r = size * (1 - t * 0.7);
+        const x = Math.cos(angle) * r * (1 + Math.sin(t * Math.PI * 3) * 0.2);
+        const y = Math.sin(angle) * r * (1 + Math.cos(t * Math.PI * 4) * 0.15);
+        path.push({ x, y });
+      }
+
+      this.ornamentPaths.push({ ...corner, path, size });
+    });
+  }
+
+  gold(alpha = 1) {
+    return `rgba(212, 175, 55, ${alpha})`;
+  }
+
+  goldBright(alpha = 1) {
+    return `rgba(255, 215, 0, ${alpha})`;
+  }
+
+  goldDark(alpha = 1) {
+    return `rgba(139, 115, 85, ${alpha})`;
+  }
+
+  drawBackground() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    // Solid black
+    this.bgCtx.fillStyle = '#0a0a0a';
+    this.bgCtx.fillRect(0, 0, w, h);
+
+    // Subtle radial gradient
+    const gradient = this.bgCtx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.6);
+    gradient.addColorStop(0, 'rgba(30, 25, 15, 0.3)');
+    gradient.addColorStop(1, 'transparent');
+    this.bgCtx.fillStyle = gradient;
+    this.bgCtx.fillRect(0, 0, w, h);
+  }
+
+  drawRays(intensity) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const cx = w / 2;
+    const cy = h / 2;
+
+    this.raysCtx.clearRect(0, 0, w, h);
+
+    // Art Deco rays
+    const rayLength = Math.max(w, h);
+
+    for (let i = 0; i < this.rayCount; i++) {
+      const baseAngle = (i / this.rayCount) * Math.PI * 2;
+      const angle = baseAngle + Math.sin(this.time * 0.3 + i) * 0.05;
+      const width = 2 + intensity * 15 + Math.sin(this.time + i * 0.5) * 3;
+
+      const gradient = this.raysCtx.createLinearGradient(
+        cx, cy,
+        cx + Math.cos(angle) * rayLength,
+        cy + Math.sin(angle) * rayLength
+      );
+      gradient.addColorStop(0, this.gold(0.4 + intensity * 0.3));
+      gradient.addColorStop(0.3, this.goldDark(0.2));
+      gradient.addColorStop(1, 'transparent');
+
+      this.raysCtx.save();
+      this.raysCtx.translate(cx, cy);
+      this.raysCtx.rotate(angle);
+
+      this.raysCtx.beginPath();
+      this.raysCtx.moveTo(0, -width/2);
+      this.raysCtx.lineTo(rayLength, -width * 0.1);
+      this.raysCtx.lineTo(rayLength, width * 0.1);
+      this.raysCtx.lineTo(0, width/2);
+      this.raysCtx.closePath();
+
+      this.raysCtx.fillStyle = gradient;
+      this.raysCtx.fill();
+
+      this.raysCtx.restore();
+    }
+  }
+
+  drawCentralForm(intensity) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const cx = w / 2;
+    const cy = h / 2;
+    const baseSize = Math.min(w, h) * 0.15;
+    const size = baseSize * (1 + this.centralPulse * 0.3);
+
+    this.mainCtx.save();
+    this.mainCtx.translate(cx, cy);
+
+    // Mandala/geometric form
+    for (let layer = 3; layer >= 0; layer--) {
+      const layerSize = size * (1 - layer * 0.2);
+      const alpha = 0.3 + layer * 0.15 + intensity * 0.2;
+
+      this.mainCtx.strokeStyle = this.gold(alpha);
+      this.mainCtx.lineWidth = 1 + layer * 0.5;
+
+      this.mainCtx.beginPath();
+      for (let i = 0; i <= this.symmetry; i++) {
+        const angle = (i / this.symmetry) * Math.PI * 2 + this.time * 0.1 * (layer % 2 ? 1 : -1);
+        const r = layerSize * (1 + Math.sin(angle * 3 + this.time) * 0.1);
+        const x = Math.cos(angle) * r;
+        const y = Math.sin(angle) * r;
+
+        if (i === 0) {
+          this.mainCtx.moveTo(x, y);
+        } else {
+          this.mainCtx.lineTo(x, y);
+        }
+      }
+      this.mainCtx.closePath();
+      this.mainCtx.stroke();
+
+      // Inner decorations
+      for (let i = 0; i < this.symmetry; i++) {
+        const angle = (i / this.symmetry) * Math.PI * 2 + this.time * 0.05;
+        const x1 = Math.cos(angle) * layerSize * 0.3;
+        const y1 = Math.sin(angle) * layerSize * 0.3;
+        const x2 = Math.cos(angle) * layerSize * 0.8;
+        const y2 = Math.sin(angle) * layerSize * 0.8;
+
+        this.mainCtx.beginPath();
+        this.mainCtx.moveTo(x1, y1);
+        this.mainCtx.lineTo(x2, y2);
+        this.mainCtx.stroke();
+      }
+    }
+
+    // Center circle
+    const centerGlow = this.mainCtx.createRadialGradient(0, 0, 0, 0, 0, size * 0.3);
+    centerGlow.addColorStop(0, this.goldBright(0.5 + intensity * 0.5));
+    centerGlow.addColorStop(0.5, this.gold(0.2));
+    centerGlow.addColorStop(1, 'transparent');
+
+    this.mainCtx.fillStyle = centerGlow;
+    this.mainCtx.beginPath();
+    this.mainCtx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
+    this.mainCtx.fill();
+
+    this.mainCtx.restore();
+  }
+
+  drawOrnaments(intensity) {
+    const ctx = this.ornCtx;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    ctx.clearRect(0, 0, w, h);
+
+    this.ornamentPaths.forEach((orn, index) => {
+      ctx.save();
+      ctx.translate(orn.x, orn.y);
+      ctx.rotate(orn.rot);
+
+      const pulseScale = 1 + Math.sin(this.time * 2 + index) * 0.02 * intensity;
+      ctx.scale(pulseScale, pulseScale);
+
+      // Main flourish
+      ctx.strokeStyle = this.gold(0.6 + intensity * 0.3);
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+
+      ctx.beginPath();
+      orn.path.forEach((point, i) => {
+        if (i === 0) {
+          ctx.moveTo(point.x, point.y);
+        } else {
+          ctx.lineTo(point.x, point.y);
+        }
+      });
+      ctx.stroke();
+
+      // Decorative dots
+      ctx.fillStyle = this.goldBright(0.8);
+      orn.path.forEach((point, i) => {
+        if (i % 5 === 0) {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 2 + intensity * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      // Corner accent lines
+      ctx.strokeStyle = this.goldDark(0.4);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(orn.size * 0.3, 0);
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, orn.size * 0.3);
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // Frame border
+    ctx.strokeStyle = this.gold(0.3);
+    ctx.lineWidth = 1;
+    const margin = 30;
+    ctx.strokeRect(margin, margin, w - margin * 2, h - margin * 2);
+
+    // Inner frame
+    ctx.strokeStyle = this.goldDark(0.2);
+    ctx.strokeRect(margin + 10, margin + 10, w - margin * 2 - 20, h - margin * 2 - 20);
+  }
+
+  updateParticles(intensity) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    // Spawn particles
+    if (this.rng.next() < 0.1 + intensity * 0.3) {
+      this.particles.push({
+        x: this.rng.range(0, w),
+        y: this.rng.range(0, h),
+        vx: (this.rng.next() - 0.5) * 0.5,
+        vy: this.rng.range(-1, -0.2),
+        size: this.rng.range(1, 3),
+        life: 1,
+        decay: this.rng.range(0.005, 0.015),
+      });
+    }
+
+    // Update and draw
+    this.particles = this.particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+
+      if (p.life <= 0) return false;
+
+      this.mainCtx.fillStyle = this.gold(p.life * 0.8);
+      this.mainCtx.beginPath();
+      this.mainCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      this.mainCtx.fill();
+
+      return true;
+    });
+  }
+
+  spawnBurst(x, y, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const speed = 2 + Math.random() * 4;
+      this.particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 2 + Math.random() * 3,
+        life: 1,
+        decay: 0.02,
+      });
+    }
+  }
+
+  update() {
+    const now = performance.now();
+    const delta = now - this.lastTime;
+    this.lastTime = now;
+    this.time += delta * 0.001;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const audioData = this.audio.getFrequencyData();
+
+    // Calculate intensity
+    let bass = 0, mid = 0;
+    if (audioData) {
+      for (let i = 0; i < 10; i++) bass += audioData[i];
+      for (let i = 10; i < 50; i++) mid += audioData[i];
+      bass = bass / 10 / 255;
+      mid = mid / 40 / 255;
+    }
+
+    const intensity = (bass + mid) / 2;
+    this.bassEnergy = this.bassEnergy * 0.9 + bass * 0.1;
+    this.centralPulse = this.centralPulse * 0.85 + bass * 0.15;
+
+    // Trigger effects
+    if (this.audio.kickTriggered && !this.lastKick) {
+      this.flashIntensity = 0.3;
+      this.spawnBurst(w/2, h/2, 15);
+    }
+    this.lastKick = this.audio.kickTriggered;
+
+    if (this.audio.snareTriggered && !this.lastSnare) {
+      this.spawnBurst(w/2, h/2, 8);
+    }
+    this.lastSnare = this.audio.snareTriggered;
+
+    if (this.audio.dropTriggered && !this.lastDrop) {
+      this.flashIntensity = 1;
+      this.wordIndex = (this.wordIndex + 1) % this.words.length;
+      this.wordEl.textContent = this.words[this.wordIndex];
+      this.wordEl.classList.add('visible');
+      setTimeout(() => this.wordEl.classList.remove('visible'), 800);
+      this.spawnBurst(w/2, h/2, 40);
+    }
+    this.lastDrop = this.audio.dropTriggered;
+
+    // === DRAW ===
+    this.drawBackground();
+    this.drawRays(this.bassEnergy);
+
+    this.mainCtx.clearRect(0, 0, w, h);
+    this.drawCentralForm(intensity);
+    this.updateParticles(intensity);
+
+    this.drawOrnaments(intensity);
+
+    // Flash
+    if (this.flashIntensity > 0) {
+      this.flashCanvas.style.opacity = this.flashIntensity;
+      this.flashCtx.fillStyle = this.goldBright(1);
+      this.flashCtx.fillRect(0, 0, w, h);
+      this.flashIntensity -= 0.05;
+    } else {
+      this.flashCanvas.style.opacity = 0;
+    }
+  }
+}
+
+// ============================================
+// MAIN
+// ============================================
+let audio, visuals;
+
+// Generate random seed
+const seed = Math.floor(Math.random() * 1000000);
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  audio = new MajesticAudio(seed);
+  await audio.init();
+
+  visuals = new MajesticVisuals(audio, seed);
+
+  function animate() {
+    visuals.update();
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+
+// Update seed display before click
+document.getElementById('seed-value').textContent = seed;
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#start-overlay')) return;
+  if (visuals) {
+    visuals.spawnBurst(e.clientX, e.clientY, 20);
+    visuals.flashIntensity = 0.2;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && visuals) {
+    visuals.flashIntensity = 0.5;
+    visuals.spawnBurst(window.innerWidth/2, window.innerHeight/2, 30);
+  }
+});
+</script>
+
+</body>
+</html>
