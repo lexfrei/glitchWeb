@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C̸̛H̵̨A̷͝O̶̕S̵̛</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Courier New', monospace;
+}
+
+#main-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+#noise-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.15;
+  mix-blend-mode: overlay;
+}
+
+#text-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  mix-blend-mode: difference;
+}
+
+#central-text {
+  font-size: clamp(3rem, 15vw, 12rem);
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.05em;
+  text-shadow:
+    0 0 20px currentColor,
+    0 0 40px currentColor,
+    0 0 80px currentColor;
+  animation: textPulse 0.1s infinite;
+}
+
+@keyframes textPulse {
+  0%, 100% { opacity: 0.9; transform: scale(1) skew(0deg); }
+  25% { opacity: 1; transform: scale(1.002) skew(0.5deg); }
+  50% { opacity: 0.85; transform: scale(0.998) skew(-0.3deg); }
+  75% { opacity: 0.95; transform: scale(1.001) skew(0.2deg); }
+}
+
+#overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 1px,
+      rgba(0,0,0,0.3) 1px,
+      rgba(0,0,0,0.3) 2px
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 0%,
+      transparent 40%,
+      rgba(0,0,0,0.6) 100%
+    );
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+#start-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#start-text {
+  font-size: 1.2rem;
+  color: #888;
+  letter-spacing: 0.5em;
+  animation: flicker 0.15s infinite;
+}
+
+#warning {
+  margin-top: 20px;
+  font-size: 0.7rem;
+  color: #444;
+  letter-spacing: 0.2em;
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.4; }
+  33% { opacity: 1; }
+  66% { opacity: 0.6; }
+}
+
+#hud {
+  position: fixed;
+  top: 15px;
+  left: 15px;
+  z-index: 50;
+  font-size: 9px;
+  color: rgba(255,255,255,0.4);
+  font-family: 'Courier New', monospace;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+#spectrum {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 60px;
+  z-index: 4;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div id="start-text">EMBRACE THE CHAOS</div>
+  <div id="warning">PHOTOSENSITIVITY WARNING: CONTAINS FLASHING</div>
+</div>
+
+<canvas id="main-canvas"></canvas>
+<canvas id="noise-canvas"></canvas>
+<canvas id="spectrum"></canvas>
+
+<div id="text-layer">
+  <div id="central-text">NOISE</div>
+</div>
+
+<div id="overlay"></div>
+
+<div id="hud">
+  <div>HUE: <span id="hue-val">0</span></div>
+  <div>HARMONY: <span id="harmony-val">COMPLEMENTARY</span></div>
+  <div>DENSITY: <span id="density-val">0.00</span></div>
+  <div>FREQ: <span id="freq-val">220</span>Hz</div>
+</div>
+
+<script>
+class ColorHarmony {
+  constructor() {
+    this.baseHue = Math.random() * 360;
+    this.targetHue = this.baseHue;
+    this.harmonyType = 0;
+    this.harmonyTypes = [
+      'complementary',
+      'triadic',
+      'split-complementary',
+      'analogous',
+      'tetradic',
+      'square'
+    ];
+    this.transitionSpeed = 0.02;
+    this.shiftAccumulator = 0;
+  }
+
+  update(delta) {
+    this.shiftAccumulator += delta;
+
+    // Плавный дрифт базового оттенка
+    this.baseHue += Math.sin(this.shiftAccumulator * 0.0005) * 0.3;
+    this.baseHue = (this.baseHue + 360) % 360;
+
+    // Плавный переход к целевому
+    const diff = this.targetHue - this.baseHue;
+    if (Math.abs(diff) > 0.1) {
+      this.baseHue += diff * this.transitionSpeed;
+    }
+
+    // Случайные резкие смены (редко)
+    if (Math.random() < 0.001) {
+      this.sharpShift();
+    }
+
+    document.getElementById('hue-val').textContent = Math.round(this.baseHue);
+    document.getElementById('harmony-val').textContent = this.harmonyTypes[this.harmonyType].toUpperCase();
+  }
+
+  sharpShift() {
+    this.targetHue = Math.random() * 360;
+    this.harmonyType = Math.floor(Math.random() * this.harmonyTypes.length);
+  }
+
+  getColors(count = 5) {
+    const colors = [];
+    const h = this.baseHue;
+
+    switch (this.harmonyTypes[this.harmonyType]) {
+      case 'complementary':
+        colors.push(h, (h + 180) % 360);
+        colors.push((h + 15) % 360, (h + 195) % 360);
+        colors.push((h - 15 + 360) % 360);
+        break;
+
+      case 'triadic':
+        colors.push(h, (h + 120) % 360, (h + 240) % 360);
+        colors.push((h + 60) % 360, (h + 180) % 360);
+        break;
+
+      case 'split-complementary':
+        colors.push(h, (h + 150) % 360, (h + 210) % 360);
+        colors.push((h + 30) % 360, (h + 330) % 360);
+        break;
+
+      case 'analogous':
+        for (let i = -2; i <= 2; i++) {
+          colors.push((h + i * 30 + 360) % 360);
+        }
+        break;
+
+      case 'tetradic':
+        colors.push(h, (h + 90) % 360, (h + 180) % 360, (h + 270) % 360);
+        colors.push((h + 45) % 360);
+        break;
+
+      case 'square':
+        colors.push(h, (h + 90) % 360, (h + 180) % 360, (h + 270) % 360);
+        colors.push((h + 135) % 360);
+        break;
+    }
+
+    return colors.slice(0, count);
+  }
+
+  hsl(hue, sat = 70, light = 55, alpha = 1) {
+    return `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+  }
+
+  getRandomHarmonic() {
+    const hues = this.getColors();
+    return hues[Math.floor(Math.random() * hues.length)];
+  }
+}
+
+class DirtyAudio {
+  constructor() {
+    this.ctx = null;
+    this.isPlaying = false;
+    this.analyser = null;
+    this.frequencyData = null;
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.12;
+
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    // Дисторшн
+    this.distortion = this.ctx.createWaveShaper();
+    this.distortion.curve = this.makeDistortionCurve(200);
+    this.distortion.oversample = '4x';
+
+    // Битовый дробитель (эмуляция)
+    this.bitcrusher = this.ctx.createWaveShaper();
+    this.bitcrusher.curve = this.makeBitcrushCurve(6);
+
+    // Фильтры
+    this.lowpass = this.ctx.createBiquadFilter();
+    this.lowpass.type = 'lowpass';
+    this.lowpass.frequency.value = 4000;
+    this.lowpass.Q.value = 8;
+
+    this.highpass = this.ctx.createBiquadFilter();
+    this.highpass.type = 'highpass';
+    this.highpass.frequency.value = 60;
+
+    // Reverb
+    this.reverb = await this.createReverb();
+    this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = 0.4;
+
+    // Delay
+    this.delay = this.ctx.createDelay(2);
+    this.delay.delayTime.value = 0.3;
+    this.delayFeedback = this.ctx.createGain();
+    this.delayFeedback.gain.value = 0.5;
+
+    // Routing
+    this.masterGain
+      .connect(this.distortion)
+      .connect(this.lowpass)
+      .connect(this.highpass)
+      .connect(this.analyser)
+      .connect(this.ctx.destination);
+
+    this.masterGain.connect(this.delay);
+    this.delay.connect(this.delayFeedback);
+    this.delayFeedback.connect(this.delay);
+    this.delay.connect(this.bitcrusher);
+    this.bitcrusher.connect(this.ctx.destination);
+
+    this.masterGain.connect(this.reverb);
+    this.reverb.connect(this.reverbGain);
+    this.reverbGain.connect(this.ctx.destination);
+
+    this.isPlaying = true;
+
+    this.startNoiseDrone();
+    this.startBassline();
+    this.startGlitchRhythm();
+    this.startMelody();
+  }
+
+  makeDistortionCurve(amount) {
+    const samples = 44100;
+    const curve = new Float32Array(samples);
+    const deg = Math.PI / 180;
+
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+    }
+    return curve;
+  }
+
+  makeBitcrushCurve(bits) {
+    const samples = 44100;
+    const curve = new Float32Array(samples);
+    const steps = Math.pow(2, bits);
+
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      curve[i] = Math.round(x * steps) / steps;
+    }
+    return curve;
+  }
+
+  async createReverb() {
+    const convolver = this.ctx.createConvolver();
+    const rate = this.ctx.sampleRate;
+    const length = rate * 4;
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        const decay = Math.pow(1 - i / length, 1.5);
+        data[i] = (Math.random() * 2 - 1) * decay;
+        // Добавляем ранние отражения
+        if (i < rate * 0.1 && Math.random() < 0.02) {
+          data[i] += (Math.random() * 2 - 1) * 0.5;
+        }
+      }
+    }
+
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  startNoiseDrone() {
+    const bufferSize = 2 * this.ctx.sampleRate;
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+
+    // Броуновский шум
+    let lastOut = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      output[i] = (lastOut + (0.02 * white)) / 1.02;
+      lastOut = output[i];
+      output[i] *= 3.5;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = 0.08;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 500;
+    noiseFilter.Q.value = 2;
+
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    noise.start();
+
+    // Модулируем частоту фильтра
+    const modulateNoise = () => {
+      if (!this.isPlaying) return;
+
+      const freq = 200 + Math.random() * 2000;
+      noiseFilter.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.5);
+
+      setTimeout(modulateNoise, 500 + Math.random() * 2000);
+    };
+    modulateNoise();
+  }
+
+  startBassline() {
+    const notes = [55, 55, 73.42, 55, 82.41, 55, 98, 82.41]; // A1 based
+    let noteIndex = 0;
+
+    const playBass = () => {
+      if (!this.isPlaying) return;
+
+      const freq = notes[noteIndex % notes.length];
+      noteIndex++;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+
+      // Суб-осциллятор
+      const sub = this.ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.value = freq / 2;
+
+      const subGain = this.ctx.createGain();
+      subGain.gain.value = 0.3;
+
+      const now = this.ctx.currentTime;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+      osc.connect(gain).connect(this.masterGain);
+      sub.connect(subGain).connect(this.masterGain);
+
+      osc.start(now);
+      sub.start(now);
+      osc.stop(now + 0.4);
+      sub.stop(now + 0.4);
+
+      document.getElementById('freq-val').textContent = Math.round(freq);
+
+      // Случайная вариация ритма
+      let interval = 250;
+      if (Math.random() < 0.2) interval = 125;
+      if (Math.random() < 0.1) interval = 500;
+
+      setTimeout(playBass, interval);
+    };
+
+    playBass();
+  }
+
+  startGlitchRhythm() {
+    const playGlitch = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+      const burstCount = 1 + Math.floor(Math.random() * 6);
+
+      for (let i = 0; i < burstCount; i++) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = ['square', 'sawtooth'][Math.floor(Math.random() * 2)];
+        osc.frequency.value = 100 + Math.random() * 3000;
+
+        const attackTime = 0.001;
+        const duration = 0.005 + Math.random() * 0.03;
+        const startTime = now + i * 0.02;
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.08, startTime + attackTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+        osc.connect(gain).connect(this.masterGain);
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.01);
+      }
+
+      const nextTime = 100 + Math.random() * 400;
+      setTimeout(playGlitch, nextTime);
+    };
+
+    playGlitch();
+  }
+
+  startMelody() {
+    // Минорная пентатоника
+    const scale = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22];
+    const baseFreq = 220;
+    let prevNote = 0;
+
+    const playNote = () => {
+      if (!this.isPlaying) return;
+
+      // Чаще двигаемся по ступеням, иногда прыгаем
+      let noteIndex;
+      if (Math.random() < 0.7) {
+        noteIndex = prevNote + Math.floor(Math.random() * 3) - 1;
+      } else {
+        noteIndex = Math.floor(Math.random() * scale.length);
+      }
+      noteIndex = Math.max(0, Math.min(scale.length - 1, noteIndex));
+      prevNote = noteIndex;
+
+      const semitone = scale[noteIndex];
+      const freq = baseFreq * Math.pow(2, semitone / 12);
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = ['sine', 'triangle', 'square'][Math.floor(Math.random() * 3)];
+      osc.frequency.value = freq;
+
+      const now = this.ctx.currentTime;
+      const duration = 0.1 + Math.random() * 0.3;
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.02);
+      gain.gain.setTargetAtTime(0.03, now + 0.02, 0.1);
+      gain.gain.setTargetAtTime(0.001, now + duration, 0.1);
+
+      osc.connect(gain).connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + duration + 0.2);
+
+      // Случайное повторение ноты
+      if (Math.random() < 0.3) {
+        setTimeout(() => {
+          if (!this.isPlaying) return;
+          const echo = this.ctx.createOscillator();
+          const echoGain = this.ctx.createGain();
+          echo.type = osc.type;
+          echo.frequency.value = freq * (Math.random() < 0.9 ? 1 : 2);
+          echoGain.gain.setValueAtTime(0.02, this.ctx.currentTime);
+          echoGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+          echo.connect(echoGain).connect(this.masterGain);
+          echo.start();
+          echo.stop(this.ctx.currentTime + 0.15);
+        }, 50 + Math.random() * 100);
+      }
+
+      const nextTime = 150 + Math.random() * 500;
+      setTimeout(playNote, nextTime);
+    };
+
+    playNote();
+  }
+
+  getFrequencyData() {
+    if (this.analyser) {
+      this.analyser.getByteFrequencyData(this.frequencyData);
+    }
+    return this.frequencyData;
+  }
+}
+
+class DirtyVisuals {
+  constructor(colorHarmony) {
+    this.colors = colorHarmony;
+    this.canvas = document.getElementById('main-canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.noiseCanvas = document.getElementById('noise-canvas');
+    this.noiseCtx = this.noiseCanvas.getContext('2d');
+    this.spectrumCanvas = document.getElementById('spectrum');
+    this.spectrumCtx = this.spectrumCanvas.getContext('2d');
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.lastTime = performance.now();
+    this.particles = [];
+    this.lines = [];
+    this.blocks = [];
+    this.density = 0;
+
+    this.initParticles();
+    this.initLines();
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+
+    [this.canvas, this.noiseCanvas].forEach(c => {
+      c.width = window.innerWidth * dpr;
+      c.height = window.innerHeight * dpr;
+      c.getContext('2d').scale(dpr, dpr);
+    });
+
+    this.spectrumCanvas.width = window.innerWidth * dpr;
+    this.spectrumCanvas.height = 60 * dpr;
+    this.spectrumCtx.scale(dpr, dpr);
+  }
+
+  initParticles() {
+    const count = 300;
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        vx: (Math.random() - 0.5) * 4,
+        vy: (Math.random() - 0.5) * 4,
+        size: 1 + Math.random() * 4,
+        hueOffset: Math.random() * 60 - 30,
+        life: Math.random(),
+      });
+    }
+  }
+
+  initLines() {
+    const count = 50;
+    for (let i = 0; i < count; i++) {
+      this.lines.push({
+        x1: Math.random() * window.innerWidth,
+        y1: Math.random() * window.innerHeight,
+        x2: Math.random() * window.innerWidth,
+        y2: Math.random() * window.innerHeight,
+        speed: 0.5 + Math.random() * 2,
+        hueOffset: Math.random() * 30,
+        width: 1 + Math.random() * 3,
+      });
+    }
+  }
+
+  update(audioData) {
+    const now = performance.now();
+    const delta = now - this.lastTime;
+    this.lastTime = now;
+    this.time += delta;
+
+    this.colors.update(delta);
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    // Размытие предыдущего кадра
+    this.ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + Math.random() * 0.05})`;
+    this.ctx.fillRect(0, 0, w, h);
+
+    // Вычисляем "громкость"
+    let volume = 0;
+    if (audioData) {
+      for (let i = 0; i < audioData.length; i++) {
+        volume += audioData[i];
+      }
+      volume = volume / audioData.length / 255;
+    }
+    this.density = volume;
+    document.getElementById('density-val').textContent = this.density.toFixed(2);
+
+    // Фоновые градиенты
+    this.drawBackground(volume);
+
+    // Линии
+    this.updateLines(volume);
+
+    // Частицы
+    this.updateParticles(volume);
+
+    // Глитч-блоки
+    this.updateBlocks(volume);
+
+    // Шум
+    this.updateNoise();
+
+    // Спектр
+    this.drawSpectrum(audioData);
+
+    // Случайные резкие эффекты
+    if (Math.random() < 0.02) {
+      this.flashEffect();
+    }
+  }
+
+  drawBackground(volume) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const hues = this.colors.getColors(3);
+
+    // Несколько накладывающихся градиентов
+    for (let i = 0; i < 3; i++) {
+      const x = (Math.sin(this.time * 0.0003 + i * 2) * 0.5 + 0.5) * w;
+      const y = (Math.cos(this.time * 0.0002 + i * 3) * 0.5 + 0.5) * h;
+      const radius = 200 + volume * 500 + Math.sin(this.time * 0.001 + i) * 100;
+
+      const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius);
+      gradient.addColorStop(0, this.colors.hsl(hues[i], 80, 50, 0.3));
+      gradient.addColorStop(0.5, this.colors.hsl(hues[i], 70, 40, 0.1));
+      gradient.addColorStop(1, 'transparent');
+
+      this.ctx.fillStyle = gradient;
+      this.ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  updateParticles(volume) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.particles.forEach(p => {
+      // Движение с турбулентностью
+      p.x += p.vx * (1 + volume * 3);
+      p.y += p.vy * (1 + volume * 3);
+
+      // Добавляем шум к скорости
+      p.vx += (Math.random() - 0.5) * 0.3 * volume;
+      p.vy += (Math.random() - 0.5) * 0.3 * volume;
+
+      // Ограничиваем скорость
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (speed > 5) {
+        p.vx = (p.vx / speed) * 5;
+        p.vy = (p.vy / speed) * 5;
+      }
+
+      // Оборачиваем
+      if (p.x < 0) p.x = w;
+      if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      if (p.y > h) p.y = 0;
+
+      // Рисуем
+      const hue = this.colors.getRandomHarmonic() + p.hueOffset;
+      const alpha = 0.3 + volume * 0.5;
+
+      this.ctx.beginPath();
+      this.ctx.fillStyle = this.colors.hsl(hue, 80, 60, alpha);
+      this.ctx.arc(p.x, p.y, p.size * (1 + volume), 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // След
+      if (volume > 0.3) {
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = this.colors.hsl(hue, 70, 50, 0.2);
+        this.ctx.lineWidth = p.size * 0.5;
+        this.ctx.moveTo(p.x, p.y);
+        this.ctx.lineTo(p.x - p.vx * 5, p.y - p.vy * 5);
+        this.ctx.stroke();
+      }
+    });
+  }
+
+  updateLines(volume) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.lines.forEach(line => {
+      // Движение точек
+      line.x1 += Math.sin(this.time * 0.001 * line.speed) * 2;
+      line.y1 += Math.cos(this.time * 0.0012 * line.speed) * 2;
+      line.x2 += Math.cos(this.time * 0.0008 * line.speed) * 2;
+      line.y2 += Math.sin(this.time * 0.001 * line.speed) * 2;
+
+      // Оборачиваем
+      [line.x1, line.x2] = [line.x1, line.x2].map(x => ((x % w) + w) % w);
+      [line.y1, line.y2] = [line.y1, line.y2].map(y => ((y % h) + h) % h);
+
+      const hue = this.colors.getRandomHarmonic() + line.hueOffset;
+
+      this.ctx.beginPath();
+      this.ctx.strokeStyle = this.colors.hsl(hue, 70, 55, 0.15 + volume * 0.2);
+      this.ctx.lineWidth = line.width * (1 + volume);
+      this.ctx.moveTo(line.x1, line.y1);
+      this.ctx.lineTo(line.x2, line.y2);
+      this.ctx.stroke();
+    });
+  }
+
+  updateBlocks(volume) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    // Добавляем новые блоки
+    if (Math.random() < 0.1 + volume * 0.3) {
+      const hue = this.colors.getRandomHarmonic();
+      this.blocks.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        w: 5 + Math.random() * 150 * volume,
+        h: 2 + Math.random() * 30,
+        hue: hue,
+        life: 0.5 + Math.random() * 0.5,
+        vx: (Math.random() - 0.5) * 10,
+      });
+    }
+
+    // Обновляем и рисуем
+    this.blocks = this.blocks.filter(block => {
+      block.life -= 0.02;
+      block.x += block.vx;
+
+      if (block.life <= 0) return false;
+
+      this.ctx.fillStyle = this.colors.hsl(block.hue, 80, 55, block.life * 0.8);
+      this.ctx.fillRect(block.x, block.y, block.w, block.h);
+
+      // Отражение
+      this.ctx.fillStyle = this.colors.hsl((block.hue + 180) % 360, 80, 55, block.life * 0.3);
+      this.ctx.fillRect(block.x + 3, block.y + 2, block.w, block.h);
+
+      return true;
+    });
+  }
+
+  updateNoise() {
+    const w = this.noiseCanvas.width;
+    const h = this.noiseCanvas.height;
+    const imageData = this.noiseCtx.createImageData(w, h);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const v = Math.random() * 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+
+    this.noiseCtx.putImageData(imageData, 0, 0);
+  }
+
+  drawSpectrum(audioData) {
+    if (!audioData) return;
+
+    const w = window.innerWidth;
+    const h = 60;
+
+    this.spectrumCtx.clearRect(0, 0, w, h);
+
+    const barWidth = w / audioData.length;
+    const hues = this.colors.getColors(5);
+
+    for (let i = 0; i < audioData.length; i++) {
+      const barHeight = (audioData[i] / 255) * h;
+      const hue = hues[i % hues.length];
+
+      this.spectrumCtx.fillStyle = this.colors.hsl(hue, 80, 50, 0.6);
+      this.spectrumCtx.fillRect(i * barWidth, h - barHeight, barWidth - 1, barHeight);
+    }
+  }
+
+  flashEffect() {
+    const hue = this.colors.getRandomHarmonic();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.ctx.fillStyle = this.colors.hsl(hue, 90, 70, 0.1);
+    this.ctx.fillRect(0, 0, w, h);
+
+    // Резкая смена палитры
+    if (Math.random() < 0.3) {
+      this.colors.sharpShift();
+    }
+  }
+}
+
+class TextGlitcher {
+  constructor(colors) {
+    this.colors = colors;
+    this.element = document.getElementById('central-text');
+    this.words = [
+      'NOISE', 'CHAOS', 'VOID', 'FLUX', 'SURGE',
+      'PULSE', 'DRIFT', 'STATIC', 'ENTROPY', 'WAVE',
+      'FLOW', 'BREAK', 'CRASH', 'BURN', 'FADE'
+    ];
+    this.currentIndex = 0;
+    this.isGlitching = false;
+
+    this.startCycle();
+  }
+
+  startCycle() {
+    setInterval(() => {
+      if (Math.random() < 0.15) {
+        this.glitchTransition();
+      }
+    }, 1500);
+
+    setInterval(() => {
+      if (Math.random() < 0.4) {
+        this.microGlitch();
+      }
+    }, 100);
+  }
+
+  glitchTransition() {
+    if (this.isGlitching) return;
+    this.isGlitching = true;
+
+    const glitchDuration = 200;
+    const steps = 10;
+    const stepTime = glitchDuration / steps;
+
+    let step = 0;
+    const interval = setInterval(() => {
+      const chars = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      let text = '';
+      const targetWord = this.words[(this.currentIndex + 1) % this.words.length];
+
+      for (let i = 0; i < targetWord.length; i++) {
+        if (Math.random() < step / steps) {
+          text += targetWord[i];
+        } else {
+          text += chars[Math.floor(Math.random() * chars.length)];
+        }
+      }
+
+      this.element.textContent = text;
+      step++;
+
+      if (step >= steps) {
+        clearInterval(interval);
+        this.currentIndex = (this.currentIndex + 1) % this.words.length;
+        this.element.textContent = this.words[this.currentIndex];
+        this.isGlitching = false;
+      }
+    }, stepTime);
+  }
+
+  microGlitch() {
+    const word = this.words[this.currentIndex];
+    const pos = Math.floor(Math.random() * word.length);
+    const chars = '!@#$%^&*';
+
+    let glitched = word.split('');
+    glitched[pos] = chars[Math.floor(Math.random() * chars.length)];
+
+    this.element.textContent = glitched.join('');
+
+    setTimeout(() => {
+      if (!this.isGlitching) {
+        this.element.textContent = word;
+      }
+    }, 50);
+  }
+
+  updateColor() {
+    const hue = this.colors.getRandomHarmonic();
+    this.element.style.color = this.colors.hsl(hue, 80, 70, 1);
+    this.element.style.textShadow = `
+      0 0 20px ${this.colors.hsl(hue, 80, 60, 0.8)},
+      0 0 40px ${this.colors.hsl(hue, 80, 50, 0.6)},
+      0 0 80px ${this.colors.hsl(hue, 80, 40, 0.4)}
+    `;
+  }
+}
+
+// Main
+let colorHarmony, audio, visuals, textGlitcher;
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  colorHarmony = new ColorHarmony();
+  audio = new DirtyAudio();
+  await audio.init();
+
+  visuals = new DirtyVisuals(colorHarmony);
+  textGlitcher = new TextGlitcher(colorHarmony);
+
+  function animate() {
+    const audioData = audio.getFrequencyData();
+    visuals.update(audioData);
+
+    if (Math.random() < 0.05) {
+      textGlitcher.updateColor();
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+
+// Интерактивность
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#start-overlay')) return;
+
+  if (colorHarmony) {
+    colorHarmony.sharpShift();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && colorHarmony) {
+    colorHarmony.sharpShift();
+  }
+});
+</script>
+
+</body>
+</html>
