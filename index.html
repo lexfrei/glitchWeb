@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G̷L̸I̵T̶C̷H̸</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+@font-face {
+  font-family: 'Mono';
+  src: local('Courier New'), local('monospace');
+}
+
+:root {
+  --glitch-1: #ff00ff;
+  --glitch-2: #00ffff;
+  --glitch-3: #ffff00;
+  --bg: #0a0a0a;
+  --fg: #e0e0e0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: 'Courier New', monospace;
+}
+
+#canvas-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+}
+
+#ascii-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--fg);
+  opacity: 0.7;
+  mix-blend-mode: difference;
+  white-space: pre;
+  font-family: 'Courier New', monospace;
+}
+
+#glitch-text {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  font-size: clamp(2rem, 8vw, 6rem);
+  font-weight: bold;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.5em;
+  animation: glitch-anim 2s infinite linear alternate-reverse;
+  text-shadow:
+    0.05em 0 0 var(--glitch-1),
+    -0.025em -0.05em 0 var(--glitch-2),
+    0.025em 0.05em 0 var(--glitch-3);
+}
+
+#glitch-text::before,
+#glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#glitch-text::before {
+  animation: glitch-1 0.3s infinite linear alternate-reverse;
+  clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%);
+  color: var(--glitch-1);
+  opacity: 0.8;
+}
+
+#glitch-text::after {
+  animation: glitch-2 0.4s infinite linear alternate-reverse;
+  clip-path: polygon(0 65%, 100% 65%, 100% 100%, 0 100%);
+  color: var(--glitch-2);
+  opacity: 0.8;
+}
+
+@keyframes glitch-anim {
+  0%, 100% { transform: translate(-50%, -50%) skew(0deg); }
+  20% { transform: translate(-52%, -50%) skew(2deg); }
+  40% { transform: translate(-48%, -51%) skew(-1deg); }
+  60% { transform: translate(-51%, -49%) skew(1deg); }
+  80% { transform: translate(-49%, -50%) skew(-2deg); }
+}
+
+@keyframes glitch-1 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(-3px, 2px); }
+  40% { transform: translate(3px, -2px); }
+  60% { transform: translate(-2px, -1px); }
+  80% { transform: translate(2px, 1px); }
+}
+
+@keyframes glitch-2 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(3px, -2px); }
+  40% { transform: translate(-3px, 2px); }
+  60% { transform: translate(2px, 1px); }
+  80% { transform: translate(-2px, -1px); }
+}
+
+#scanlines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.15) 4px
+  );
+}
+
+#vignette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 101;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0%,
+    transparent 50%,
+    rgba(0, 0, 0, 0.8) 100%
+  );
+}
+
+#noise {
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  z-index: 99;
+  pointer-events: none;
+  opacity: 0.05;
+  animation: noise 0.2s infinite;
+}
+
+@keyframes noise {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-5%, -5%); }
+  20% { transform: translate(5%, 5%); }
+  30% { transform: translate(-5%, 5%); }
+  40% { transform: translate(5%, -5%); }
+  50% { transform: translate(-5%, 0); }
+  60% { transform: translate(5%, 0); }
+  70% { transform: translate(0, 5%); }
+  80% { transform: translate(0, -5%); }
+  90% { transform: translate(5%, 5%); }
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.5s;
+}
+
+#start-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#start-text {
+  font-size: 1.5rem;
+  color: var(--fg);
+  letter-spacing: 0.3em;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.glitch-block {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+#status {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 200;
+  font-size: 10px;
+  color: var(--glitch-2);
+  opacity: 0.6;
+  font-family: 'Courier New', monospace;
+}
+
+#chromatic {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div id="start-text">[ CLICK TO ENTER THE VOID ]</div>
+</div>
+
+<div id="canvas-container">
+  <canvas id="main-canvas"></canvas>
+</div>
+
+<div id="ascii-layer"></div>
+
+<div id="glitch-text" data-text="VOID">VOID</div>
+
+<canvas id="chromatic"></canvas>
+<canvas id="noise"></canvas>
+<div id="scanlines"></div>
+<div id="vignette"></div>
+
+<div id="status">
+  <span id="freq">440Hz</span> | <span id="wave">sine</span> | <span id="entropy">0.00</span>
+</div>
+
+<script>
+class GlitchAudio {
+  constructor() {
+    this.ctx = null;
+    this.nodes = [];
+    this.isPlaying = false;
+    this.entropy = 0;
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.15;
+
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -20;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 8;
+
+    this.filter = this.ctx.createBiquadFilter();
+    this.filter.type = 'lowpass';
+    this.filter.frequency.value = 2000;
+    this.filter.Q.value = 5;
+
+    this.reverb = await this.createReverb();
+
+    this.masterGain
+      .connect(this.filter)
+      .connect(this.compressor)
+      .connect(this.reverb)
+      .connect(this.ctx.destination);
+
+    this.isPlaying = true;
+    this.startDrone();
+    this.startArpeggio();
+    this.startGlitchBursts();
+  }
+
+  async createReverb() {
+    const convolver = this.ctx.createConvolver();
+    const rate = this.ctx.sampleRate;
+    const length = rate * 3;
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+      }
+    }
+
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  startDrone() {
+    const baseFreqs = [55, 110, 165, 220];
+
+    baseFreqs.forEach((freq, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = ['sine', 'triangle', 'sawtooth'][i % 3];
+      osc.frequency.value = freq;
+      gain.gain.value = 0.03 / (i + 1);
+
+      osc.connect(gain).connect(this.masterGain);
+      osc.start();
+
+      this.nodes.push({ osc, gain, baseFreq: freq });
+
+      this.modulateDrone(osc, freq);
+    });
+  }
+
+  modulateDrone(osc, baseFreq) {
+    const modulate = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+      const deviation = (Math.random() - 0.5) * 10 * this.entropy;
+      const duration = 2 + Math.random() * 4;
+
+      osc.frequency.setTargetAtTime(baseFreq + deviation, now, duration);
+
+      setTimeout(modulate, duration * 1000);
+    };
+    modulate();
+  }
+
+  startArpeggio() {
+    const scales = [
+      [0, 3, 7, 10, 12, 15, 19],
+      [0, 2, 3, 5, 7, 8, 10],
+      [0, 1, 4, 5, 7, 8, 11],
+    ];
+
+    let scaleIndex = 0;
+    let noteIndex = 0;
+
+    const playNote = () => {
+      if (!this.isPlaying) return;
+
+      const scale = scales[scaleIndex];
+      const semitone = scale[noteIndex % scale.length];
+      const octave = Math.floor(noteIndex / scale.length);
+      const freq = 220 * Math.pow(2, (semitone + octave * 12) / 12);
+
+      this.playTone(freq, 0.1 + Math.random() * 0.2, 0.02);
+
+      document.getElementById('freq').textContent = Math.round(freq) + 'Hz';
+
+      noteIndex++;
+
+      if (Math.random() < 0.1) {
+        scaleIndex = Math.floor(Math.random() * scales.length);
+        noteIndex = 0;
+      }
+
+      if (Math.random() < 0.05 * this.entropy) {
+        noteIndex = Math.floor(Math.random() * 14);
+      }
+
+      const interval = 150 + Math.random() * 350 - this.entropy * 100;
+      setTimeout(playNote, Math.max(50, interval));
+    };
+
+    playNote();
+  }
+
+  playTone(freq, duration, volume = 0.05) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    const types = ['sine', 'triangle', 'square', 'sawtooth'];
+    osc.type = types[Math.floor(Math.random() * types.length)];
+    osc.frequency.value = freq;
+
+    document.getElementById('wave').textContent = osc.type;
+
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+    osc.connect(gain).connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + duration + 0.1);
+  }
+
+  startGlitchBursts() {
+    const burst = () => {
+      if (!this.isPlaying) return;
+
+      if (Math.random() < 0.3 + this.entropy * 0.5) {
+        const burstCount = Math.floor(2 + Math.random() * 8 * this.entropy);
+
+        for (let i = 0; i < burstCount; i++) {
+          setTimeout(() => {
+            const freq = 100 + Math.random() * 2000;
+            const dur = 0.01 + Math.random() * 0.05;
+            this.playTone(freq, dur, 0.01 + Math.random() * 0.02);
+          }, i * (10 + Math.random() * 30));
+        }
+      }
+
+      const nextBurst = 500 + Math.random() * 2000 - this.entropy * 500;
+      setTimeout(burst, Math.max(100, nextBurst));
+    };
+
+    burst();
+  }
+
+  setEntropy(value) {
+    this.entropy = Math.max(0, Math.min(1, value));
+    document.getElementById('entropy').textContent = this.entropy.toFixed(2);
+
+    if (this.filter) {
+      this.filter.frequency.setTargetAtTime(
+        1000 + this.entropy * 4000,
+        this.ctx.currentTime,
+        0.1
+      );
+    }
+  }
+}
+
+class GlitchVisuals {
+  constructor() {
+    this.canvas = document.getElementById('main-canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.noiseCanvas = document.getElementById('noise');
+    this.noiseCtx = this.noiseCanvas.getContext('2d');
+    this.chromaticCanvas = document.getElementById('chromatic');
+    this.chromaticCtx = this.chromaticCanvas.getContext('2d');
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.entropy = 0;
+    this.shapes = [];
+    this.glitchBlocks = [];
+
+    for (let i = 0; i < 20; i++) {
+      this.shapes.push({
+        x: Math.random() * this.canvas.width,
+        y: Math.random() * this.canvas.height,
+        size: 20 + Math.random() * 100,
+        speedX: (Math.random() - 0.5) * 2,
+        speedY: (Math.random() - 0.5) * 2,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.05,
+        type: Math.floor(Math.random() * 4),
+        hue: Math.random() * 360,
+      });
+    }
+
+    this.generateNoise();
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+
+    [this.canvas, this.noiseCanvas, this.chromaticCanvas].forEach(c => {
+      c.width = window.innerWidth * dpr;
+      c.height = window.innerHeight * dpr;
+      c.getContext('2d').scale(dpr, dpr);
+    });
+  }
+
+  generateNoise() {
+    const w = this.noiseCanvas.width;
+    const h = this.noiseCanvas.height;
+    const imageData = this.noiseCtx.createImageData(w, h);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const v = Math.random() * 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+
+    this.noiseCtx.putImageData(imageData, 0, 0);
+  }
+
+  update() {
+    this.time += 0.016;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.ctx.fillStyle = `rgba(10, 10, 10, ${0.1 + this.entropy * 0.1})`;
+    this.ctx.fillRect(0, 0, w, h);
+
+    this.shapes.forEach((shape, i) => {
+      shape.x += shape.speedX * (1 + this.entropy);
+      shape.y += shape.speedY * (1 + this.entropy);
+      shape.rotation += shape.rotationSpeed;
+
+      if (shape.x < -shape.size) shape.x = w + shape.size;
+      if (shape.x > w + shape.size) shape.x = -shape.size;
+      if (shape.y < -shape.size) shape.y = h + shape.size;
+      if (shape.y > h + shape.size) shape.y = -shape.size;
+
+      this.ctx.save();
+      this.ctx.translate(shape.x, shape.y);
+      this.ctx.rotate(shape.rotation);
+
+      const alpha = 0.1 + Math.sin(this.time + i) * 0.05;
+      this.ctx.strokeStyle = `hsla(${shape.hue + this.time * 10}, 80%, 60%, ${alpha})`;
+      this.ctx.lineWidth = 1 + this.entropy * 2;
+
+      this.ctx.beginPath();
+      switch (shape.type) {
+        case 0:
+          this.ctx.rect(-shape.size/2, -shape.size/2, shape.size, shape.size);
+          break;
+        case 1:
+          this.ctx.arc(0, 0, shape.size/2, 0, Math.PI * 2);
+          break;
+        case 2:
+          for (let j = 0; j < 3; j++) {
+            const angle = (j / 3) * Math.PI * 2 - Math.PI / 2;
+            const x = Math.cos(angle) * shape.size / 2;
+            const y = Math.sin(angle) * shape.size / 2;
+            j === 0 ? this.ctx.moveTo(x, y) : this.ctx.lineTo(x, y);
+          }
+          this.ctx.closePath();
+          break;
+        case 3:
+          for (let j = 0; j < 6; j++) {
+            const angle = (j / 6) * Math.PI * 2;
+            const x = Math.cos(angle) * shape.size / 2;
+            const y = Math.sin(angle) * shape.size / 2;
+            j === 0 ? this.ctx.moveTo(x, y) : this.ctx.lineTo(x, y);
+          }
+          this.ctx.closePath();
+          break;
+      }
+      this.ctx.stroke();
+
+      this.ctx.restore();
+    });
+
+    if (Math.random() < 0.02 + this.entropy * 0.1) {
+      this.createGlitchBlock();
+    }
+
+    this.glitchBlocks = this.glitchBlocks.filter(block => {
+      block.life -= 0.02;
+      if (block.life <= 0) return false;
+
+      this.ctx.save();
+      this.ctx.globalAlpha = block.life;
+      this.ctx.fillStyle = block.color;
+      this.ctx.fillRect(block.x, block.y, block.w, block.h);
+      this.ctx.restore();
+
+      return true;
+    });
+
+    this.drawDataStream();
+
+    if (Math.random() < 0.05 * this.entropy) {
+      this.chromaticAberration();
+    }
+
+    if (Math.random() < 0.1) {
+      this.generateNoise();
+    }
+  }
+
+  createGlitchBlock() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00'];
+
+    this.glitchBlocks.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      w: 10 + Math.random() * 200 * this.entropy,
+      h: 2 + Math.random() * 20,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      life: 0.5 + Math.random() * 0.5,
+    });
+  }
+
+  drawDataStream() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.ctx.font = '10px Courier New';
+    this.ctx.fillStyle = `rgba(0, 255, 255, ${0.1 + this.entropy * 0.1})`;
+
+    for (let i = 0; i < 5 + this.entropy * 10; i++) {
+      const x = Math.random() * w;
+      const y = (this.time * 100 + i * 50) % h;
+      const chars = '01010111001010101110001'.split('');
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      this.ctx.fillText(char, x, y);
+    }
+  }
+
+  chromaticAberration() {
+    const canvas = this.chromaticCanvas;
+    const ctx = this.chromaticCtx;
+
+    canvas.style.opacity = '0.3';
+
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+    const offset = 5 + Math.random() * 10 * this.entropy;
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(this.canvas, offset, 0);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+    setTimeout(() => {
+      canvas.style.opacity = '0';
+    }, 50);
+  }
+
+  setEntropy(value) {
+    this.entropy = Math.max(0, Math.min(1, value));
+  }
+}
+
+class ASCIIArt {
+  constructor() {
+    this.container = document.getElementById('ascii-layer');
+    this.chars = ' .:-=+*#%@'.split('');
+    this.glitchChars = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`'.split('');
+    this.time = 0;
+    this.entropy = 0;
+    this.width = 0;
+    this.height = 0;
+    this.grid = [];
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize() {
+    const charWidth = 6;
+    const charHeight = 10;
+
+    this.width = Math.floor(window.innerWidth / charWidth);
+    this.height = Math.floor(window.innerHeight / charHeight);
+
+    this.grid = [];
+    for (let y = 0; y < this.height; y++) {
+      this.grid[y] = [];
+      for (let x = 0; x < this.width; x++) {
+        this.grid[y][x] = ' ';
+      }
+    }
+  }
+
+  update() {
+    this.time += 0.05;
+
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+
+        let value = Math.sin(dist * 0.1 - this.time) * 0.5 + 0.5;
+        value += Math.sin(angle * 3 + this.time * 0.5) * 0.2;
+        value += Math.sin(x * 0.05 + this.time) * Math.sin(y * 0.05 + this.time) * 0.3;
+
+        value = Math.max(0, Math.min(1, value));
+
+        if (Math.random() < 0.01 * this.entropy) {
+          this.grid[y][x] = this.glitchChars[Math.floor(Math.random() * this.glitchChars.length)];
+        } else {
+          const charIndex = Math.floor(value * (this.chars.length - 1));
+          this.grid[y][x] = this.chars[charIndex];
+        }
+      }
+    }
+
+    if (Math.random() < 0.1 * this.entropy) {
+      const glitchY = Math.floor(Math.random() * this.height);
+      const glitchWidth = Math.floor(5 + Math.random() * 20);
+      const glitchX = Math.floor(Math.random() * (this.width - glitchWidth));
+
+      for (let x = glitchX; x < glitchX + glitchWidth && x < this.width; x++) {
+        this.grid[glitchY][x] = this.glitchChars[Math.floor(Math.random() * this.glitchChars.length)];
+      }
+    }
+
+    let output = '';
+    for (let y = 0; y < this.height; y++) {
+      output += this.grid[y].join('') + '\n';
+    }
+
+    this.container.textContent = output;
+  }
+
+  setEntropy(value) {
+    this.entropy = Math.max(0, Math.min(1, value));
+  }
+}
+
+class GlitchText {
+  constructor() {
+    this.element = document.getElementById('glitch-text');
+    this.words = ['VOID', 'NULL', 'ERROR', 'CHAOS', 'STATIC', 'NOISE', 'GLITCH', 'DATA', 'FLOW', 'ZERO', 'LOOP', 'BREAK'];
+    this.currentWord = 0;
+    this.entropy = 0;
+
+    this.startWordCycle();
+  }
+
+  startWordCycle() {
+    setInterval(() => {
+      if (Math.random() < 0.3 + this.entropy * 0.5) {
+        this.currentWord = (this.currentWord + 1) % this.words.length;
+        const word = this.words[this.currentWord];
+        this.element.textContent = word;
+        this.element.setAttribute('data-text', word);
+      }
+    }, 2000);
+
+    setInterval(() => {
+      if (Math.random() < 0.2 * this.entropy) {
+        const word = this.element.textContent;
+        let glitched = '';
+        for (let i = 0; i < word.length; i++) {
+          if (Math.random() < 0.3) {
+            glitched += String.fromCharCode(33 + Math.floor(Math.random() * 94));
+          } else {
+            glitched += word[i];
+          }
+        }
+        this.element.textContent = glitched;
+
+        setTimeout(() => {
+          this.element.textContent = this.words[this.currentWord];
+        }, 100);
+      }
+    }, 200);
+  }
+
+  setEntropy(value) {
+    this.entropy = Math.max(0, Math.min(1, value));
+  }
+}
+
+let audio, visuals, ascii, glitchText;
+let entropy = 0.3;
+let targetEntropy = 0.3;
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  audio = new GlitchAudio();
+  await audio.init();
+
+  visuals = new GlitchVisuals();
+  ascii = new ASCIIArt();
+  glitchText = new GlitchText();
+
+  setEntropy(entropy);
+
+  function animate() {
+    entropy += (targetEntropy - entropy) * 0.05;
+    setEntropy(entropy);
+
+    visuals.update();
+    ascii.update();
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+
+function setEntropy(value) {
+  if (audio) audio.setEntropy(value);
+  if (visuals) visuals.setEntropy(value);
+  if (ascii) ascii.setEntropy(value);
+  if (glitchText) glitchText.setEntropy(value);
+}
+
+document.addEventListener('mousemove', (e) => {
+  const x = e.clientX / window.innerWidth;
+  const y = e.clientY / window.innerHeight;
+  targetEntropy = (x + y) / 2;
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'start-overlay' || e.target.id === 'start-text') return;
+
+  targetEntropy = Math.random();
+
+  if (visuals) {
+    for (let i = 0; i < 10; i++) {
+      visuals.createGlitchBlock();
+    }
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    targetEntropy = targetEntropy > 0.5 ? 0.1 : 0.9;
+  }
+});
+</script>
+
+</body>
+</html>
