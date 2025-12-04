@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C̸O̷L̶O̵S̸S̷U̶S̵</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Times New Roman', serif;
+  cursor: none;
+}
+
+canvas { position: fixed; top: 0; left: 0; }
+#bg { z-index: 1; }
+#world { z-index: 2; }
+#creature { z-index: 3; }
+#fx { z-index: 4; }
+#ui { z-index: 5; pointer-events: none; }
+
+#vignette {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 100;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 0%, transparent 20%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,0.95) 100%);
+}
+
+#start-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#start-overlay.hidden { display: none; }
+
+.start-line {
+  font-size: 0.7rem;
+  color: #444;
+  letter-spacing: 0.8em;
+  text-transform: uppercase;
+  margin: 8px 0;
+  opacity: 0;
+  animation: fadeIn 0.5s forwards;
+}
+
+.start-line:nth-child(1) { animation-delay: 0.2s; }
+.start-line:nth-child(2) { animation-delay: 0.6s; color: #666; }
+.start-line:nth-child(3) { animation-delay: 1s; color: #888; font-size: 0.9rem; }
+.start-line:nth-child(4) { animation-delay: 1.4s; color: #555; }
+
+@keyframes fadeIn { to { opacity: 1; } }
+
+#cursor {
+  position: fixed;
+  width: 20px; height: 20px;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 200;
+  transform: translate(-50%, -50%);
+  transition: transform 0.1s, border-color 0.2s;
+  mix-blend-mode: difference;
+}
+
+#cursor.active {
+  transform: translate(-50%, -50%) scale(2);
+  border-color: rgba(255,100,50,0.8);
+}
+
+#health-bar {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  z-index: 150;
+  overflow: hidden;
+}
+
+#health-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff3030, #ff8040, #ffcc00);
+  width: 100%;
+  transition: width 0.3s;
+}
+
+#message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 160;
+  font-size: clamp(2rem, 8vw, 6rem);
+  color: #fff;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+  text-shadow: 0 0 50px rgba(255,100,50,0.8);
+  font-weight: 100;
+}
+
+#message.visible {
+  opacity: 1;
+  animation: messageFlash 0.5s ease-out;
+}
+
+@keyframes messageFlash {
+  0% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+#phase {
+  position: fixed;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.5em;
+  z-index: 150;
+}
+</style>
+</head>
+<body>
+
+<div id="start-overlay">
+  <div class="start-line">SOMETHING STIRS IN THE VOID</div>
+  <div class="start-line">IT HAS WAITED EONS</div>
+  <div class="start-line">CLICK TO AWAKEN</div>
+  <div class="start-line">HEADPHONES REQUIRED</div>
+</div>
+
+<canvas id="bg"></canvas>
+<canvas id="world"></canvas>
+<canvas id="creature"></canvas>
+<canvas id="fx"></canvas>
+<canvas id="ui"></canvas>
+
+<div id="vignette"></div>
+<div id="cursor"></div>
+<div id="health-bar"><div id="health-fill"></div></div>
+<div id="message"></div>
+<div id="phase">PHASE I</div>
+
+<script>
+// =============================================
+// THE COLOSSUS - A BOSS FIGHT EXPERIENCE
+// =============================================
+
+class BossAudio {
+  constructor() {
+    this.ctx = null;
+    this.bpm = 150;
+    this.stepTime = 60 / this.bpm / 4;
+    this.phase = 1;
+    this.intensity = 0;
+    this.health = 1;
+
+    this.step = 0;
+    this.bar = 0;
+
+    this.hitTriggered = false;
+    this.roarTriggered = false;
+    this.impactTriggered = false;
+    this.phaseChangeTriggered = false;
+  }
+
+  async init() {
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.6;
+
+    // Sidechain compressor
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -15;
+    this.compressor.ratio.value = 12;
+    this.compressor.attack.value = 0.001;
+    this.compressor.release.value = 0.15;
+
+    // Reverb
+    this.reverb = await this.createReverb();
+    this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = 0.25;
+
+    // Delay
+    this.delay = this.ctx.createDelay(1);
+    this.delay.delayTime.value = 60 / this.bpm / 2;
+    this.delayFeedback = this.ctx.createGain();
+    this.delayFeedback.gain.value = 0.3;
+    this.delayGain = this.ctx.createGain();
+    this.delayGain.gain.value = 0.2;
+
+    // Routing
+    this.masterGain.connect(this.compressor).connect(this.ctx.destination);
+
+    this.reverbSend = this.ctx.createGain();
+    this.reverbSend.connect(this.reverb).connect(this.reverbGain).connect(this.ctx.destination);
+
+    this.delay.connect(this.delayFeedback).connect(this.delay);
+    this.delay.connect(this.delayGain).connect(this.ctx.destination);
+
+    this.isPlaying = true;
+    this.startSequencer();
+    this.startDrone();
+  }
+
+  async createReverb() {
+    const convolver = this.ctx.createConvolver();
+    const rate = this.ctx.sampleRate;
+    const length = rate * 3;
+    const impulse = this.ctx.createBuffer(2, length, rate);
+
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 1.5);
+        if (i < rate * 0.1 && Math.random() < 0.03) {
+          data[i] += (Math.random() * 2 - 1) * 0.5;
+        }
+      }
+    }
+
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  startSequencer() {
+    const tick = () => {
+      if (!this.isPlaying) return;
+
+      const now = this.ctx.currentTime;
+      const stepInBar = this.step % 16;
+
+      // Intensity increases with lower health
+      this.intensity = 1 - this.health;
+
+      // Adjust BPM based on phase
+      const targetBPM = 140 + this.phase * 15 + this.intensity * 20;
+      this.bpm = this.bpm * 0.99 + targetBPM * 0.01;
+      this.stepTime = 60 / this.bpm / 4;
+
+      // Phase 1: Heavy, slow, ominous
+      // Phase 2: Faster, more aggressive
+      // Phase 3: Chaotic, intense
+
+      // Drums
+      if (this.phase >= 1) {
+        // Kick pattern gets more complex with phase
+        const kickPattern = this.phase === 1 ? [0, 8] :
+                           this.phase === 2 ? [0, 6, 10] :
+                           [0, 3, 6, 10, 14];
+
+        if (kickPattern.includes(stepInBar)) {
+          this.playKick(now);
+        }
+
+        // Snare
+        if (stepInBar === 4 || stepInBar === 12) {
+          this.playSnare(now);
+        }
+
+        // Hats get faster with phase
+        if (this.phase >= 2 && stepInBar % 2 === 0) {
+          this.playHat(now);
+        }
+        if (this.phase === 3 && stepInBar % 1 === 0) {
+          this.playHat(now, 0.3);
+        }
+      }
+
+      // Bass
+      if (stepInBar === 0 || (this.phase >= 2 && stepInBar === 8)) {
+        this.playBass(now);
+      }
+      if (this.phase === 3 && (stepInBar === 4 || stepInBar === 12)) {
+        this.playBass(now, 0.6);
+      }
+
+      // Orchestral hits on bar changes
+      if (stepInBar === 0 && this.bar % 4 === 0) {
+        this.playOrchHit(now);
+      }
+
+      // Brass stabs
+      if (this.phase >= 2 && stepInBar === 0 && this.bar % 2 === 0) {
+        this.playBrass(now);
+      }
+
+      // Choir in phase 3
+      if (this.phase === 3 && stepInBar === 0 && this.bar % 4 === 0) {
+        this.playChoir(now);
+      }
+
+      // Random glitches based on intensity
+      if (Math.random() < 0.02 * this.phase * this.intensity) {
+        this.playGlitch(now);
+      }
+
+      this.step++;
+      if (this.step % 16 === 0) this.bar++;
+
+      setTimeout(tick, this.stepTime * 1000);
+    };
+
+    tick();
+  }
+
+  startDrone() {
+    // Ominous low drone
+    const freqs = [27.5, 41.2, 55];
+
+    freqs.forEach((freq, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = i === 0 ? 'sine' : 'sawtooth';
+      osc.frequency.value = freq;
+
+      filter.type = 'lowpass';
+      filter.frequency.value = 200 + i * 100;
+
+      gain.gain.value = 0.08 / (i + 1);
+
+      osc.connect(filter).connect(gain).connect(this.masterGain);
+      osc.start();
+
+      // Modulate
+      const modulate = () => {
+        if (!this.isPlaying) return;
+        const mod = Math.sin(this.ctx.currentTime * 0.1 * (i + 1)) * 5 * (1 + this.intensity);
+        osc.frequency.setTargetAtTime(freq + mod, this.ctx.currentTime, 0.5);
+        filter.frequency.setTargetAtTime(200 + this.intensity * 500, this.ctx.currentTime, 0.5);
+        setTimeout(modulate, 200);
+      };
+      modulate();
+    });
+  }
+
+  playKick(time) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150 + this.phase * 20, time);
+    osc.frequency.exponentialRampToValueAtTime(30, time + 0.15);
+
+    gain.gain.setValueAtTime(0.9, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+
+    // Distorted layer
+    const dist = this.ctx.createOscillator();
+    const distGain = this.ctx.createGain();
+    const distFilter = this.ctx.createBiquadFilter();
+
+    dist.type = 'square';
+    dist.frequency.setValueAtTime(80, time);
+    dist.frequency.exponentialRampToValueAtTime(40, time + 0.1);
+
+    distFilter.type = 'lowpass';
+    distFilter.frequency.value = 300;
+
+    distGain.gain.setValueAtTime(0.2 * this.phase, time);
+    distGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+
+    osc.connect(gain).connect(this.masterGain);
+    dist.connect(distFilter).connect(distGain).connect(this.masterGain);
+
+    osc.start(time);
+    osc.stop(time + 0.5);
+    dist.start(time);
+    dist.stop(time + 0.25);
+  }
+
+  playSnare(time) {
+    const noiseLen = this.ctx.sampleRate * 0.2;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 1000 + this.phase * 500;
+
+    noiseGain.gain.setValueAtTime(0.5, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(250, time);
+    body.frequency.exponentialRampToValueAtTime(100, time + 0.05);
+    bodyGain.gain.setValueAtTime(0.4, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    noise.connect(this.reverbSend);
+    body.connect(bodyGain).connect(this.masterGain);
+
+    noise.start(time);
+    body.start(time);
+    body.stop(time + 0.15);
+  }
+
+  playHat(time, vol = 0.15) {
+    const noiseLen = this.ctx.sampleRate * 0.03;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    filter.type = 'highpass';
+    filter.frequency.value = 8000;
+
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.03);
+
+    noise.connect(filter).connect(gain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playBass(time, vol = 1) {
+    const notes = [55, 55, 41.2, 55, 49, 36.7, 55, 41.2];
+    const note = notes[this.bar % notes.length];
+
+    // Sub
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.value = note;
+    subGain.gain.setValueAtTime(0.5 * vol, time);
+    subGain.gain.exponentialRampToValueAtTime(0.2 * vol, time + 0.3);
+    subGain.gain.exponentialRampToValueAtTime(0.01, time + 0.6);
+
+    // Growl
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const growlGain = this.ctx.createGain();
+    const growlFilter = this.ctx.createBiquadFilter();
+    const distortion = this.ctx.createWaveShaper();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'sawtooth';
+    osc1.frequency.value = note * 2;
+    osc2.frequency.value = note * 2 * 1.008;
+
+    growlFilter.type = 'lowpass';
+    growlFilter.frequency.setValueAtTime(2000 + this.phase * 1000, time);
+    growlFilter.frequency.exponentialRampToValueAtTime(400, time + 0.2);
+    growlFilter.Q.value = 8;
+
+    distortion.curve = this.makeDistortion(50 + this.phase * 30);
+
+    growlGain.gain.setValueAtTime(0.25 * vol, time);
+    growlGain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.5;
+    osc1.connect(merger);
+    osc2.connect(merger);
+
+    sub.connect(subGain).connect(this.masterGain);
+    merger.connect(growlFilter).connect(distortion).connect(growlGain).connect(this.masterGain);
+
+    sub.start(time);
+    osc1.start(time);
+    osc2.start(time);
+    sub.stop(time + 0.7);
+    osc1.stop(time + 0.5);
+    osc2.stop(time + 0.5);
+  }
+
+  playOrchHit(time) {
+    const notes = [55, 82.5, 110, 165, 220];
+
+    notes.forEach((note, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = i < 2 ? 'sawtooth' : 'square';
+      osc.frequency.value = note;
+
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.1 / (i + 1), time + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.4);
+
+      osc.connect(gain).connect(this.masterGain);
+      osc.connect(this.reverbSend);
+
+      osc.start(time);
+      osc.stop(time + 0.5);
+    });
+  }
+
+  playBrass(time) {
+    const freqs = [220, 277, 330];
+
+    freqs.forEach(freq => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(500, time);
+      filter.frequency.linearRampToValueAtTime(3000, time + 0.05);
+      filter.frequency.exponentialRampToValueAtTime(500, time + 0.3);
+
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.15, time + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.35);
+
+      osc.connect(filter).connect(gain).connect(this.masterGain);
+      osc.connect(this.delay);
+
+      osc.start(time);
+      osc.stop(time + 0.4);
+    });
+  }
+
+  playChoir(time) {
+    const freqs = [330, 440, 550];
+
+    freqs.forEach((freq, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+
+      filter.type = 'bandpass';
+      filter.frequency.value = 1500;
+      filter.Q.value = 3;
+
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.08, time + 0.3);
+      gain.gain.setValueAtTime(0.08, time + 1);
+      gain.gain.linearRampToValueAtTime(0, time + 2);
+
+      osc.connect(filter).connect(gain).connect(this.masterGain);
+      osc.connect(this.reverbSend);
+
+      osc.start(time);
+      osc.stop(time + 2.5);
+    });
+  }
+
+  playGlitch(time) {
+    const noiseLen = this.ctx.sampleRate * 0.05;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+
+    for (let i = 0; i < noiseLen; i++) {
+      const bit = Math.floor(Math.random() * 8);
+      data[i] = ((i >> bit) & 1) * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const gain = this.ctx.createGain();
+
+    gain.gain.setValueAtTime(0.1 * this.phase, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+
+    noise.connect(gain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playRoar(time) {
+    this.roarTriggered = true;
+    setTimeout(() => this.roarTriggered = false, 500);
+
+    // Massive low growl
+    for (let i = 0; i < 5; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(40 + i * 10, time);
+      osc.frequency.exponentialRampToValueAtTime(30 + i * 5, time + 1);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(500, time);
+      filter.frequency.exponentialRampToValueAtTime(100, time + 1);
+
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.2, time + 0.1);
+      gain.gain.setValueAtTime(0.2, time + 0.5);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 1.5);
+
+      osc.connect(filter).connect(gain).connect(this.masterGain);
+      osc.connect(this.reverbSend);
+
+      osc.start(time);
+      osc.stop(time + 2);
+    }
+
+    // Noise layer
+    const noiseLen = this.ctx.sampleRate * 1.5;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.value = 800;
+
+    noiseGain.gain.value = 0.3;
+
+    noise.connect(noiseFilter).connect(noiseGain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playHit(time) {
+    this.hitTriggered = true;
+    setTimeout(() => this.hitTriggered = false, 100);
+
+    // Impact sound
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(300, time);
+    osc.frequency.exponentialRampToValueAtTime(50, time + 0.1);
+
+    gain.gain.setValueAtTime(0.5, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+
+    osc.connect(gain).connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.25);
+
+    // Noise burst
+    const noiseLen = this.ctx.sampleRate * 0.1;
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.value = 0.3;
+
+    noise.connect(noiseGain).connect(this.masterGain);
+    noise.start(time);
+  }
+
+  playPhaseChange(time) {
+    this.phaseChangeTriggered = true;
+    setTimeout(() => this.phaseChangeTriggered = false, 1000);
+
+    // Epic riser
+    const riser = this.ctx.createOscillator();
+    const riserGain = this.ctx.createGain();
+
+    riser.type = 'sawtooth';
+    riser.frequency.setValueAtTime(50, time);
+    riser.frequency.exponentialRampToValueAtTime(2000, time + 1);
+
+    riserGain.gain.setValueAtTime(0, time);
+    riserGain.gain.linearRampToValueAtTime(0.3, time + 0.8);
+    riserGain.gain.linearRampToValueAtTime(0, time + 1);
+
+    riser.connect(riserGain).connect(this.masterGain);
+    riser.start(time);
+    riser.stop(time + 1.1);
+
+    // Impact at end
+    setTimeout(() => {
+      const impact = this.ctx.createOscillator();
+      const impactGain = this.ctx.createGain();
+
+      impact.type = 'sine';
+      impact.frequency.setValueAtTime(80, this.ctx.currentTime);
+      impact.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.5);
+
+      impactGain.gain.setValueAtTime(1, this.ctx.currentTime);
+      impactGain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.8);
+
+      impact.connect(impactGain).connect(this.masterGain);
+      impact.start();
+      impact.stop(this.ctx.currentTime + 1);
+
+      this.impactTriggered = true;
+      setTimeout(() => this.impactTriggered = false, 200);
+    }, 1000);
+  }
+
+  makeDistortion(amount) {
+    const samples = 44100;
+    const curve = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      const x = (i * 2) / samples - 1;
+      curve[i] = Math.tanh(x * amount);
+    }
+    return curve;
+  }
+
+  setPhase(phase) {
+    if (phase !== this.phase) {
+      this.phase = phase;
+      this.playPhaseChange(this.ctx.currentTime);
+    }
+  }
+}
+
+// =============================================
+// THE COLOSSUS VISUALS
+// =============================================
+
+class BossVisuals {
+  constructor(audio) {
+    this.audio = audio;
+
+    this.bgCanvas = document.getElementById('bg');
+    this.bgCtx = this.bgCanvas.getContext('2d');
+
+    this.worldCanvas = document.getElementById('world');
+    this.worldCtx = this.worldCanvas.getContext('2d');
+
+    this.creatureCanvas = document.getElementById('creature');
+    this.creatureCtx = this.creatureCanvas.getContext('2d');
+
+    this.fxCanvas = document.getElementById('fx');
+    this.fxCtx = this.fxCanvas.getContext('2d');
+
+    this.uiCanvas = document.getElementById('ui');
+    this.uiCtx = this.uiCanvas.getContext('2d');
+
+    this.cursor = document.getElementById('cursor');
+    this.healthFill = document.getElementById('health-fill');
+    this.messageEl = document.getElementById('message');
+    this.phaseEl = document.getElementById('phase');
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+
+    this.time = 0;
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.health = 1;
+    this.phase = 1;
+    this.isAttacking = false;
+    this.attackCooldown = 0;
+
+    this.particles = [];
+    this.debris = [];
+    this.lightnings = [];
+    this.eyes = [];
+
+    // Boss properties
+    this.bossX = 0;
+    this.bossY = 0;
+    this.bossScale = 1;
+    this.bossAnger = 0;
+    this.bossBreathing = 0;
+
+    // Generate eyes
+    for (let i = 0; i < 6; i++) {
+      this.eyes.push({
+        x: (Math.random() - 0.5) * 200,
+        y: -100 + Math.random() * 150,
+        size: 15 + Math.random() * 25,
+        blinkPhase: Math.random() * Math.PI * 2,
+        lookX: 0,
+        lookY: 0,
+      });
+    }
+
+    this.flashIntensity = 0;
+    this.screenShake = 0;
+
+    // Input
+    document.addEventListener('mousemove', (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+      this.cursor.style.left = e.clientX + 'px';
+      this.cursor.style.top = e.clientY + 'px';
+    });
+
+    document.addEventListener('mousedown', () => this.attack());
+    document.addEventListener('mouseup', () => this.isAttacking = false);
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    [this.bgCanvas, this.worldCanvas, this.creatureCanvas, this.fxCanvas, this.uiCanvas].forEach(c => {
+      c.width = w * dpr;
+      c.height = h * dpr;
+      c.style.width = w + 'px';
+      c.style.height = h + 'px';
+      c.getContext('2d').scale(dpr, dpr);
+    });
+
+    this.bossX = w / 2;
+    this.bossY = h * 0.4;
+  }
+
+  attack() {
+    if (this.attackCooldown > 0) return;
+
+    this.isAttacking = true;
+    this.attackCooldown = 0.2;
+    this.cursor.classList.add('active');
+    setTimeout(() => this.cursor.classList.remove('active'), 200);
+
+    // Check if hitting boss
+    const dx = this.mouseX - this.bossX;
+    const dy = this.mouseY - this.bossY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 150 * this.bossScale) {
+      this.hitBoss();
+    }
+
+    // Spawn attack particles
+    for (let i = 0; i < 10; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      this.particles.push({
+        x: this.mouseX,
+        y: this.mouseY,
+        vx: Math.cos(angle) * (3 + Math.random() * 5),
+        vy: Math.sin(angle) * (3 + Math.random() * 5),
+        size: 2 + Math.random() * 4,
+        life: 1,
+        color: `hsl(${30 + Math.random() * 30}, 100%, 60%)`,
+      });
+    }
+  }
+
+  hitBoss() {
+    const damage = 0.02 + Math.random() * 0.01;
+    this.health -= damage;
+    this.audio.health = this.health;
+    this.audio.playHit(this.audio.ctx.currentTime);
+
+    this.screenShake = 0.5;
+    this.bossAnger = Math.min(1, this.bossAnger + 0.1);
+
+    // Spawn debris
+    for (let i = 0; i < 15; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 5 + Math.random() * 10;
+      this.debris.push({
+        x: this.bossX + (Math.random() - 0.5) * 100,
+        y: this.bossY + (Math.random() - 0.5) * 100,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 5,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.3,
+        size: 5 + Math.random() * 15,
+        life: 1,
+      });
+    }
+
+    // Phase changes
+    if (this.health <= 0.66 && this.phase === 1) {
+      this.phase = 2;
+      this.audio.setPhase(2);
+      this.showMessage('PHASE II');
+      this.phaseEl.textContent = 'PHASE II';
+      this.audio.playRoar(this.audio.ctx.currentTime);
+    } else if (this.health <= 0.33 && this.phase === 2) {
+      this.phase = 3;
+      this.audio.setPhase(3);
+      this.showMessage('FINAL PHASE');
+      this.phaseEl.textContent = 'FINAL PHASE';
+      this.audio.playRoar(this.audio.ctx.currentTime);
+    } else if (this.health <= 0) {
+      this.health = 0;
+      this.showMessage('COLOSSUS DEFEATED');
+      // Victory explosion
+      for (let i = 0; i < 100; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 10 + Math.random() * 20;
+        this.debris.push({
+          x: this.bossX,
+          y: this.bossY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.5,
+          size: 10 + Math.random() * 30,
+          life: 1,
+        });
+      }
+    }
+
+    this.healthFill.style.width = (this.health * 100) + '%';
+  }
+
+  showMessage(text) {
+    this.messageEl.textContent = text;
+    this.messageEl.classList.add('visible');
+    setTimeout(() => this.messageEl.classList.remove('visible'), 2000);
+  }
+
+  drawBackground() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const ctx = this.bgCtx;
+
+    // Dark gradient
+    const gradient = ctx.createRadialGradient(w/2, h * 0.3, 0, w/2, h * 0.3, h);
+    gradient.addColorStop(0, `rgba(40, 20, 30, ${0.3 + this.audio.intensity * 0.2})`);
+    gradient.addColorStop(0.5, 'rgba(15, 10, 20, 0.8)');
+    gradient.addColorStop(1, '#000');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+
+    // Pulsing glow behind boss
+    const pulseGlow = ctx.createRadialGradient(this.bossX, this.bossY, 0, this.bossX, this.bossY, 300);
+    const glowIntensity = 0.1 + Math.sin(this.time * 2) * 0.05 + this.bossAnger * 0.2;
+    pulseGlow.addColorStop(0, `rgba(150, 50, 30, ${glowIntensity})`);
+    pulseGlow.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = pulseGlow;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  drawBoss() {
+    const ctx = this.creatureCtx;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (this.health <= 0) return;
+
+    ctx.save();
+
+    // Screen shake
+    if (this.screenShake > 0) {
+      ctx.translate(
+        (Math.random() - 0.5) * this.screenShake * 20,
+        (Math.random() - 0.5) * this.screenShake * 20
+      );
+    }
+
+    ctx.translate(this.bossX, this.bossY);
+
+    // Breathing animation
+    this.bossBreathing = Math.sin(this.time * 1.5) * 0.05;
+    const scale = this.bossScale * (1 + this.bossBreathing) * (1 + this.bossAnger * 0.2);
+    ctx.scale(scale, scale);
+
+    // Boss body - massive dark form
+    const bodyGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 200);
+    bodyGradient.addColorStop(0, '#1a1215');
+    bodyGradient.addColorStop(0.5, '#0d0a0c');
+    bodyGradient.addColorStop(1, '#050305');
+
+    ctx.fillStyle = bodyGradient;
+    ctx.beginPath();
+
+    // Organic, irregular shape
+    const points = 24;
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const baseRadius = 120 + Math.sin(angle * 3 + this.time) * 20;
+      const noise = Math.sin(angle * 7 + this.time * 2) * 15 * (1 + this.bossAnger);
+      const r = baseRadius + noise;
+
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r * 0.8;
+
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Outer glow/aura
+    ctx.strokeStyle = `rgba(100, 30, 20, ${0.3 + this.bossAnger * 0.4})`;
+    ctx.lineWidth = 3 + this.bossAnger * 5;
+    ctx.stroke();
+
+    // Tendrils
+    ctx.strokeStyle = '#1a1215';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < 8; i++) {
+      const baseAngle = (i / 8) * Math.PI * 2;
+      const waveOffset = Math.sin(this.time * 2 + i) * 0.2;
+
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(baseAngle) * 100, Math.sin(baseAngle) * 80);
+
+      const length = 80 + Math.sin(this.time + i * 2) * 30;
+      const segments = 5;
+
+      for (let j = 1; j <= segments; j++) {
+        const t = j / segments;
+        const angle = baseAngle + waveOffset * t + Math.sin(this.time * 3 + i + j) * 0.3;
+        const r = 100 + length * t;
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r * 0.8);
+      }
+
+      ctx.stroke();
+    }
+
+    // Eyes
+    this.eyes.forEach((eye, i) => {
+      // Look at mouse
+      const worldEyeX = this.bossX + eye.x * scale;
+      const worldEyeY = this.bossY + eye.y * scale;
+      const dx = this.mouseX - worldEyeX;
+      const dy = this.mouseY - worldEyeY;
+      const angle = Math.atan2(dy, dx);
+      const lookDist = Math.min(eye.size * 0.3, 10);
+
+      eye.lookX = eye.lookX * 0.9 + Math.cos(angle) * lookDist * 0.1;
+      eye.lookY = eye.lookY * 0.9 + Math.sin(angle) * lookDist * 0.1;
+
+      // Blink
+      const blink = Math.sin(this.time * 0.5 + eye.blinkPhase);
+      const openness = blink > 0.9 ? 1 - (blink - 0.9) * 10 : 1;
+
+      if (openness > 0.1) {
+        // Eye socket
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(eye.x, eye.y, eye.size, eye.size * openness, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Iris
+        const irisColor = this.phase === 3 ? '#ff3030' : this.phase === 2 ? '#ff6030' : '#ff8040';
+        ctx.fillStyle = irisColor;
+        ctx.beginPath();
+        ctx.arc(eye.x + eye.lookX, eye.y + eye.lookY, eye.size * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pupil
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(eye.x + eye.lookX, eye.y + eye.lookY, eye.size * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.arc(eye.x + eye.lookX - eye.size * 0.15, eye.y + eye.lookY - eye.size * 0.15, eye.size * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // Mouth (opens when angry or roaring)
+    const mouthOpen = this.bossAnger * 30 + (this.audio.roarTriggered ? 50 : 0);
+    if (mouthOpen > 5) {
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(0, 60, 40 + mouthOpen * 0.5, mouthOpen, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner glow
+      const mouthGlow = ctx.createRadialGradient(0, 60, 0, 0, 60, mouthOpen);
+      mouthGlow.addColorStop(0, `rgba(255, 100, 30, ${0.5 + this.bossAnger * 0.5})`);
+      mouthGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = mouthGlow;
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  drawEffects() {
+    const ctx = this.fxCtx;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Lightning during phase changes or high anger
+    if (this.audio.phaseChangeTriggered || this.bossAnger > 0.7) {
+      if (Math.random() < 0.1 + this.bossAnger * 0.2) {
+        this.spawnLightning();
+      }
+    }
+
+    // Update and draw lightning
+    this.lightnings = this.lightnings.filter(l => {
+      l.life -= 0.1;
+      if (l.life <= 0) return false;
+
+      ctx.strokeStyle = `rgba(200, 150, 255, ${l.life})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      let x = l.startX;
+      let y = l.startY;
+      ctx.moveTo(x, y);
+
+      const segments = 10;
+      for (let i = 0; i < segments; i++) {
+        x += (l.endX - l.startX) / segments + (Math.random() - 0.5) * 50;
+        y += (l.endY - l.startY) / segments + (Math.random() - 0.5) * 30;
+        ctx.lineTo(x, y);
+      }
+
+      ctx.stroke();
+      return true;
+    });
+
+    // Particles
+    this.particles = this.particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.1;
+      p.life -= 0.02;
+
+      if (p.life <= 0) return false;
+
+      ctx.fillStyle = p.color.replace(')', `, ${p.life})`).replace('hsl', 'hsla');
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+
+      return true;
+    });
+
+    // Debris
+    this.debris = this.debris.filter(d => {
+      d.x += d.vx;
+      d.y += d.vy;
+      d.vy += 0.3;
+      d.rotation += d.rotSpeed;
+      d.life -= 0.01;
+
+      if (d.life <= 0 || d.y > h + 50) return false;
+
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rotation);
+      ctx.fillStyle = `rgba(40, 30, 35, ${d.life})`;
+      ctx.fillRect(-d.size/2, -d.size/2, d.size, d.size * 0.6);
+      ctx.restore();
+
+      return true;
+    });
+
+    // Flash
+    if (this.flashIntensity > 0 || this.audio.impactTriggered) {
+      const flash = this.audio.impactTriggered ? 0.8 : this.flashIntensity;
+      ctx.fillStyle = `rgba(255, 200, 150, ${flash})`;
+      ctx.fillRect(0, 0, w, h);
+      this.flashIntensity -= 0.1;
+    }
+  }
+
+  spawnLightning() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.lightnings.push({
+      startX: this.bossX + (Math.random() - 0.5) * 200,
+      startY: this.bossY + (Math.random() - 0.5) * 100,
+      endX: Math.random() * w,
+      endY: Math.random() < 0.5 ? 0 : h,
+      life: 1,
+    });
+  }
+
+  update() {
+    const delta = 1/60;
+    this.time += delta;
+
+    if (this.attackCooldown > 0) this.attackCooldown -= delta;
+    if (this.screenShake > 0) this.screenShake -= delta * 2;
+    if (this.bossAnger > 0) this.bossAnger -= delta * 0.1;
+
+    this.drawBackground();
+    this.drawBoss();
+    this.drawEffects();
+  }
+}
+
+// =============================================
+// MAIN
+// =============================================
+
+let audio, visuals;
+
+document.getElementById('start-overlay').addEventListener('click', async () => {
+  document.getElementById('start-overlay').classList.add('hidden');
+
+  audio = new BossAudio();
+  await audio.init();
+
+  visuals = new BossVisuals(audio);
+
+  // Initial roar
+  setTimeout(() => {
+    audio.playRoar(audio.ctx.currentTime);
+    visuals.showMessage('COLOSSUS AWAKENS');
+  }, 500);
+
+  function animate() {
+    visuals.update();
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+});
+</script>
+
+</body>
+</html>
